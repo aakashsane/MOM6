@@ -1669,7 +1669,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, 
   ! note that there 0 nad mld_index also exist in the shape function
   real, dimension(k_points+3) :: SF  ! shape function on w grid
 
-
+  real :: hbl ! BOundary layer depth, same as MLD_guess, metres
   real :: x5 ! used in asymptotic model for sm
 
   
@@ -1677,11 +1677,11 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, 
   do n=2,SZK_(GV)+1
       hz(n)=hz(n-1) + h(n-1)*GV%H_to_Z
   end do
-
+  hbl = MLD_Guess
   shape_func=0.0  ! initializing the entire shape_function array
 
-  p1 = (MLD_Guess * absf)/(u_star)
-  p2 = -((B_flux * MLD_Guess))/(u_star**3)
+  p1 = (hbl * absf)/(u_star)
+  p2 = -((B_flux * hbl))/(u_star**3)
   p2= p2 * 2.4390 ! dividing by von-Karman constant 0.41 i.e. multiply by 2.44
   
 
