@@ -2671,17 +2671,15 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
                  units="nondim", default=.false.)
   
    call get_param(param_file, mdl, "Equation_Discovery_velocity", CS%eqdisc_v0, &
-                 "flag for activating equation discovery for vel uses Boundary Layer Depth", &
+                 "flag for activating equation discovery for velocity scale", &
                  units="nondim", default=.false.)
 
    call get_param(param_file, mdl, "Equation_Discovery_velocity2", CS%eqdisc_v0_2, &
-                 "flag for activating equation discovery for vel compact model", &
+                 "flag for activating equation discovery for velocity scale, uses boundary layer depth", &
                  units="nondim", default=.false.)
 
    call get_param(param_file, mdl, "v0_lower_cap", CS%v0_lower_cap, &
-                     "value of lower limit cap for v0, default is 1 deg", units="m/s", default=2.5454E-06)
-
-                     ! CS%f_lower
+                     "value of lower limit cap for v0, default is for 1 deg", units="m/s", default=2.5454E-06)
 
    call get_param(param_file, mdl, "CS%f_lower", CS%CS%f_lower, &
                      "value of lower limit cap for Coriolis in v0", units="1/s", default=0.0001)
