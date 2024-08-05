@@ -158,7 +158,7 @@ type, public :: energetic_PBL_CS ; private
   !/ Machine learned equation discovery model paramters ! eqdisc
   logical :: eqdisc, eqdisc_v0, eqdisc_v0_2 ! Machine Learned Equation discovery, eqdisc_v0_2: second set of equations for v0
 
-  real :: v0, v0_lower_cap   ! v0 sets magnitude of kappa. Kappa ~ v0 X h, v0_lower_cap is lower cap for v_0.
+  real :: v0, v0_lower_cap, f_lower   ! v0 sets magnitude of kappa. Kappa ~ v0 X h, v0_lower_cap is lower cap for v_0.
   real, allocatable, dimension(:) :: shape_function
 
   !/ Others
@@ -839,7 +839,10 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
   integer, dimension(SZK_(GV)) :: num_itts
 
   integer :: k, nz, itt, max_itt
-
+ 
+  ! variables for ML based diffusivity
+  real :: v0_dummy ! Variable which get recycled, is equal to v_0, part of eqdisc
+  
   nz = GV%ke
 
   debug = .false.  ! Change this hard-coded value for debugging.
@@ -1682,14 +1685,12 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, 
   p2= p2 * 2.4390 ! dividing by von-Karman constant 0.41 i.e. multiply by 2.44
   
 
-  ! This capping does not matter because these equations are asymptotics.
+  ! This capping does not matter because these equations have asymptotics.
   ! but neverthless, capping has been done. Outside the caps, the output is same.
-
   if (p1 .ge. 2.0) then 
       p1 = 2.0
   else
   endif
-
   if (p2 .le. -8.0) then 
           p2 = -8.0
   elseif (p2 .ge. 6.0) then
@@ -1697,8 +1698,6 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, 
   endif
 
   ! Empirical model to predict sm:
-  !c0,c1,c2,c3,c4,c5 = [0.05720181, 0.27277116, 0.06214072, 0.91448003, 0.49207654, 1.22461455]
-  ! the above c0,....c5 are from python script, not used, will be removed later
   
   ! x5 is solely function of p2
   x5 = (0.273 / (1.0 + exp( (-p2-0.0621)/ 0.914 )) ) + 0.492
@@ -1713,6 +1712,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, 
   sm = max(sm,0.1) ! makes sure sm is more than 0.1
 
   sm= sm * hbl ! peak of shape function in model vertical coordinate
+
 
   sm_I = 1.0/sm ! inverse of sm x hbl
   sm_I2 = 1.0/(hbl-sm)  ! inverse of (hbl-sm)
@@ -1758,8 +1758,9 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, 
       ust_c = u_star
 
 
-      if (absf .le. 2.5454E-06) then
-              absf_c = 2.5454E-06    ! avoiding zero coriolis, does not affect the solution
+      if (absf .le. CS%f_lower) then   ! 2.5454E-06) testing this
+              absf_c = CS%f_lower    ! 1 deg Latitude, cap avoids zero coriolis, 
+                                     ! does not affect the solution
       else
               absf_c = absf
       endif
@@ -1787,51 +1788,14 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, 
       v0_dummy = v0_dummy * ust_c
 
       v0_dummy=max(v0_dummy,CS%v0_lower_cap)  ! CS%v0_lower_cap
-      v0_dummy=min(v0_dummy,0.1)
+      ! v0_lower_cap has been set to 0.0001 as data below that values does not exist in the training
+      ! solution was tested for lower cap of 0.00001 and was found to be insensitive. 
+      ! sensitivity arises when lower cap is 0.0. That is when diffusivity attains extremely low values and 
+      ! they go near molecular diffusivity. Boundary layers might become "sub-grid" causing instabilities.
 
-      !print *,'v0_dummy in get_eqdisc_v0 >', v0_dummy
+      v0_dummy=min(v0_dummy,0.1) ! kept for safety, but has never hit this cap. 
 
 end subroutine get_eqdisc_v0
-
-subroutine linspace(a, b, n, array)
-    ! creates an array from a to b of size(array), including a and b.      
-    real, intent(in) :: a, b
-    integer, intent(in) :: n
-    real, intent(out) :: array(:)
-    real :: range_ab
-    integer ::  i
-    
-    range_ab = b - a
-
-    do i=1, n
-        array(i) = a+ range_ab * (i - 1) / (n - 1)
-    end do
-  end subroutine linspace
-
-  subroutine lin_interp1d(x,y,w,z, Nx, Nz)
-  ! interpolates z=f(w)  on y=g(x)
-  integer, intent(in) :: Nx, Nz ! sizes of x and w
-  real, intent(in), dimension(Nx) :: x
-  real, intent(in), dimension(Nz) :: w, z
-  real, intent(out), dimension(Nx) :: y
-  real :: m ! slope of line between 2 adjacent points of input array
-
-  integer :: i,j ! integers for looping
-  m=0.0
-
-  y(1)=z(1)
-  y(Nx)=z(Nz)
-
-  do i=2,Nx-1
-      do j=1,Nz-1
-          if ((x(i).ge.w(j)) .and. (x(i).lt.w(j+1))) then
-              m=(z(j+1)-z(j))/(w(j+1)-w(j))
-              y(i)=m*(x(i)-w(j)) + z(j)
-          endif
-      end do
-  end do
-
-end subroutine lin_interp1d
 
 !> This subroutine calculates the change in potential energy and or derivatives
 !! for several changes in an interface's diapycnal diffusivity times a timestep.
@@ -2715,7 +2679,12 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
                  units="nondim", default=.false.)
 
    call get_param(param_file, mdl, "v0_lower_cap", CS%v0_lower_cap, &
-                     "value of lower limit cap for v0", units="m/s", default=0.0001)
+                     "value of lower limit cap for v0, default is 1 deg", units="m/s", default=2.5454E-06)
+
+                     ! CS%f_lower
+
+   call get_param(param_file, mdl, "CS%f_lower", CS%CS%f_lower, &
+                     "value of lower limit cap for Coriolis in v0", units="1/s", default=0.0001)
   !/ options end for Machine Learning Equation Discovery
 
 
