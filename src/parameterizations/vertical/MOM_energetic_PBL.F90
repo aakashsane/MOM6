@@ -1712,42 +1712,23 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, 
   sm = min(sm,0.7) ! makes sure sm is less than 0.7
   sm = max(sm,0.1) ! makes sure sm is more than 0.1
 
-  sm_I = 1.0/sm ! inverse of sm
-  sm_I2 = 1.0/(1.0-sm)
-  sig = 0.0
-  call linspace(0.0, 1.0, k_points+2, sig)
-  ! print *,'sig value is >', sig
-  kappa = 0.0
+  sm= sm * hbl ! peak of shape function in model vertical coordinate
 
-  do n=2,k_points+1
-     if (sig(n) .le. sm) then
-            kappa(n-1) = -(sig(n) * sm_I)**2.0 + 2.0*(sig(n)*sm_I)
-     else 
-            kappa(n-1) = 2.0 * ((sig(n)-sm)*sm_I2)**3.0 - 3.0 *((sig(n)-sm)*sm_I2)**2.0 + 1.0
-     endif 
+  sm_I = 1.0/sm ! inverse of sm x hbl
+  sm_I2 = 1.0/(hbl-sm)  ! inverse of (hbl-sm)
+
+  shape_func = 0.0 
+
+  do n=2,SZK_(GV)+1
+     if     (hz(n) .le. sm) then
+            shape_func(n) = -(hz(n) * sm_I)**2.0 + 2.0*(hz(n)*sm_I)
+     elseif  ((hz(n) .gt. sm) .and. (hz(n) .le. hbl)) then
+            shape_func(n) =  1.99 * ((hz(n)-sm)*sm_I2)**3.0 - 2.98 *((hz(n)-sm)*sm_I2)**2.0 + 1.0
+     elseif ((hz(n) .gt. hbl)) then
+            shape_func(n) = 0.01
+
+     endif
   end do
-  
-  !print *, 'Kappa is >', kappa
-
-  w(1)=hz(1)
-  w(k_points+2)=MLD_Guess
-  w(k_points+3)=hz(SZK_(GV)+1)
-
-  do n=2,k_points+1
-      w(n)=w(n-1) + (MLD_Guess - hz(1))/(k_points+1)
-  end do
-
-  SF(1)=0.0  ! first is zero
-  !SF(k_points+2) = 0.0  ! last is zero
-  do n=2,k_points+1
-     SF(n)=kappa(n-1) ! kappa is in right direction :D :D 
-     !SF(n)=kappa(k_points+2-n) ! because NNmodel gives reverse output :D 
-  end do
-  SF(k_points+2)=SF(k_points+1) * 0.1 ! 0.1 is required. Any non-zero number gives the same solution.
-  ! replacing 0.1 with 0.0 gives wierd evolution. 0.01, 0.001, give the same answer as 0.1
-  SF(k_points+3)=SF(k_points+2) 
-
-  call lin_interp1d(hz,shape_func, w, SF, SZK_(GV)+1 , k_points+3)
 
   end subroutine kappa_eqdisc
 
