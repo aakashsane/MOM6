@@ -155,12 +155,7 @@ type, public :: energetic_PBL_CS ; private
                              !! the Ekman depth over the Obukhov depth with destabilizing forcing [nondim].
   real :: Max_Enhance_M = 5. !< The maximum allowed LT enhancement to the mixing [nondim].
 
-  !/ Machine learned equation discovery model paramters ! eqdisc
-  logical :: eqdisc, eqdisc_v0, eqdisc_v0_2 ! Machine Learned Equation discovery, eqdisc_v0_2: second set of equations for v0
-
-  real :: v0, v0_lower_cap   ! v0 sets magnitude of kappa. Kappa ~ v0 X h, v0_lower_cap is lower cap for v_0.
-  real, allocatable, dimension(:) :: shape_function
-
+!/ Machine learned equation discovery model parameters ! eqdisc
   !/ Others
   type(time_type), pointer :: Time=>NULL() !< A pointer to the ocean model's clock.
 
@@ -208,13 +203,13 @@ type, public :: energetic_PBL_CS ; private
   integer :: id_TKE_mech_decay = -1, id_TKE_conv_decay = -1
   integer :: id_Mixing_Length = -1, id_Velocity_Scale = -1
   integer :: id_MSTAR_mix = -1, id_LA_mod = -1, id_LA = -1, id_MSTAR_LT = -1
-  integer :: id_v0_diag = -1 ! eqdisc 
   !>@}
 end type energetic_PBL_CS
 
 !>@{ Enumeration values for mstar_Scheme
 integer, parameter :: Use_Fixed_MStar = 0  !< The value of mstar_scheme to use a constant mstar
 integer, parameter :: MStar_from_Ekman = 2 !< The value of mstar_scheme to base mstar on the ratio
+integer :: id_v0_diag = -1 ! eqdisc
                                            !! of the Ekman layer depth to the Obukhov depth
 integer, parameter :: MStar_from_RH18 = 3  !< The value of mstar_scheme to base mstar of of RH18
 integer, parameter :: No_Langmuir = 0      !< The value of LT_ENHANCE_FORM not use Langmuir turbulence.
@@ -985,32 +980,28 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
           MixLen_shape(K) = 1.0
         enddo ; endif
       else
-
-      call getshapefunction(CS,GV,h,absf,B_flux,u_star,MLD_guess,MixLen_shape) ! eqdisc
-          !CS%shape_function=MixLen_shape ! not sued anywehre, delete later
-          
-          v0_dummy = 0.0 ! just a dummy variable that gets passed on to subroutine get_eqdisc_v0
-          CS%v0=0.0
-  
-          if (CS%eqdisc_v0 .eqv. .true.) then
-                  call get_eqdisc_v0(CS,absf,B_flux,u_star,MLD_guess,v0_dummy)
-                  CS%v0 = v0_dummy
-
-          ! eqdisc_v0_2 will be done later
-                 
+        ! Reduce the mixing length based on MLD, with a quadratic
+        ! expression that follows KPP.
+        I_MLD = 1.0 / MLD_guess
+        dz_rsum = 0.0
+        MixLen_shape(1) = 1.0
+        do K=2,nz+1
+          dz_rsum = dz_rsum + dz(k-1)
+          if (CS%MixLenExponent==2.0) then
+            MixLen_shape(K) = CS%transLay_scale + (1.0 - CS%transLay_scale) * &
+                 (max(0.0, (MLD_guess - dz_rsum)*I_MLD) )**2 ! CS%MixLenExponent
           else
+call getshapefunction(CS,GV,h,absf,B_flux,u_star,MLD_guess,MixLen_shape) ! eqdisc
+            MixLen_shape(K) = CS%transLay_scale + (1.0 - CS%transLay_scale) * &
+                 (max(0.0, (MLD_guess - dz_rsum)*I_MLD) )**CS%MixLenExponent
           endif
-
+        enddo
       endif
-
-
-
-
-
 
       Kd(1) = 0.0 ; Kddt_h(1) = 0.0
       hp_a = h(1)
       dT_to_dPE_a(1) = dT_to_dPE(1) ; dT_to_dColHt_a(1) = dT_to_dColHt(1)
+! eqdisc_v0_2 will be done later
       dS_to_dPE_a(1) = dS_to_dPE(1) ; dS_to_dColHt_a(1) = dS_to_dColHt(1)
 
       htot = h(1) ; dztot = dz(1) ; uhtot = u(1)*h(1) ; vhtot = v(1)*h(1)
@@ -1225,8 +1216,6 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
             if (.not.CS%Use_MLD_iteration) then
               Kd_guess0 = (h_dz_int(K)*vstar) * CS%vonKar * ((dz_tt*hbs_here)*vstar) / &
                 ((CS%Ekman_scale_coef * absf) * (dz_tt*hbs_here) + vstar)
-            elseif (CS%eqdisc .eqv. .true.)  then  ! eqdisc line1/3 eqdisc stuff
-              Kd_guess0 = MixLen_shape(K) * CS%v0 * MLD_guess ! eqdisc
             else
               Kd_guess0 = (h_dz_int(K)*vstar) * CS%vonKar * mixlen(K)
             endif
@@ -1236,6 +1225,8 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
           mixvel(K) = vstar ! Track vstar
           Kddt_h_g0 = Kd_guess0 * dt_h
 
+elseif (CS%eqdisc .eqv. .true.) then ! eqdisc line1/3 eqdisc stuff
+Kd_guess0 = MixLen_shape(K) * CS%v0 * MLD_guess ! eqdisc
           if (CS%orig_PE_calc) then
             call find_PE_chg_orig(Kddt_h_g0, h(k), hp_a, dTe_term, dSe_term, &
                      dT_km1_t2, dS_km1_t2, dT_to_dPE(k), dS_to_dPE(k), &
@@ -1286,10 +1277,6 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
                 !  instead of redoing the computation will change answers...
                   Kd(K) = (h_dz_int(K)*vstar) * CS%vonKar *  ((dz_tt*hbs_here)*vstar) / &
                         ((CS%Ekman_scale_coef * absf) * (dz_tt*hbs_here) + vstar)
-
-                  elseif (CS%eqdisc .eqv. .true.)  then  ! eqdisc line2/3 eqdisc stuff
-                  Kd(K) = MixLen_shape(K) * CS%v0 * MLD_guess ! eqdisc
-                        
                 else
                   Kd(K) = (h_dz_int(K)*vstar) * CS%vonKar * mixlen(K)
                 endif
@@ -1300,6 +1287,8 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
 
               if (CS%orig_PE_calc) then
                 call find_PE_chg_orig(Kd(K)*dt_h, h(k), hp_a, dTe_term, dSe_term, &
+elseif (CS%eqdisc .eqv. .true.) then ! eqdisc line2/3 eqdisc stuff
+Kd(K) = MixLen_shape(K) * CS%v0 * MLD_guess ! eqdisc
                          dT_km1_t2, dS_km1_t2, dT_to_dPE(k), dS_to_dPE(k), &
                          dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), &
                          pres_Z(K), dT_to_dColHt(k), dS_to_dColHt(k), &
@@ -1579,278 +1568,6 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
   MLD_io = MLD_output
 
 end subroutine ePBL_column
-
-subroutine getshapefunction(CS,GV,h,absf,B_flux,u_star,MLD_guess,MixLen_shape)
-! gives you shape function
-      type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
-      type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
-     ! integer, intent(in) :: szkgv
-      real, dimension(SZK_(GV)+1), intent(inout) :: MixLen_shape
-      real, dimension(SZK_(GV)), intent(in)  :: h      !< Layer thicknesses [H ~> m or kg m-2].
-      real, intent(in) :: absf      ! The absolute value of f [T-1 ~> s-1].
-      real, intent(in) :: u_star    ! The surface friction velocity [Z T-1 ~> m s-1].
-      real, intent(in) :: B_Flux    ! The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
-      real, dimension(SZK_(GV)+1) :: hz ! depth variable, only used in this routine
-      real, intent(in) :: MLD_guess !Mixing Layer depth guessed/found for iteration [Z ~> m].
-      real :: I_MLD     ! The inverse of the current value of MLD [Z-1 ~> m-1].
-      real :: h_rsum    ! The running sum of h from the top [Z ~> m].
-      integer :: K  ! integer for loopping
-      integer :: nz ! nz = GV%ke
-      
-      nz = GV%ke
-      !print *, 'getshape subroutine has been invoked mld_guess', MLD_guess
-      I_MLD = 1.0 / MLD_guess
-      h_rsum = 0.0
-      MixLen_shape(1) = 1.0
-
-      hz=0.0  ! initiliazing hz
-       
-      if (CS%eqdisc .eqv. .true.) then ! update Kd as per equation discovery
-           hz=0.0
-           call kappa_eqdisc(MixLen_shape, CS, GV, h, absf, B_flux, u_star, MLD_guess, 16)
-      
-
-      else
-      do K=2,nz+1
-          h_rsum = h_rsum + h(k-1)*GV%H_to_Z
-          if (CS%MixLenExponent==2.0) then
-            MixLen_shape(K) = CS%transLay_scale + (1.0 - CS%transLay_scale) * &
-                 (max(0.0, (MLD_guess - h_rsum)*I_MLD) )**2 ! CS%MixLenExponent
-
-
-
-          else
-            MixLen_shape(K) = CS%transLay_scale + (1.0 - CS%transLay_scale) * &
-                 (max(0.0, (MLD_guess - h_rsum)*I_MLD) )**CS%MixLenExponent
-          endif
-      enddo
-      endif
-      !if (CS%NN .eqv. .true.) then
-      !    print *,'test_abc param file  ' !,CS%NN
-      !endif
-
-end subroutine getshapefunction
-
-subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, k_points)
-  type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
-  type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
-  real, dimension(SZK_(GV)+1), intent(inout) :: shape_func  ! shape function
-
-  real, intent(in) :: absf      ! The absolute value of f [T-1 ~> s-1].
-  real, intent(in) :: u_star    ! The surface friction velocity [Z T-1 ~> m s-1].
-  real, intent(in) :: B_Flux    ! The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
-
-  real, dimension(SZK_(GV)),intent(in) :: h   ! The layer thickness [H ~> m or kg m-2].
-  real, intent(in) :: MLD_guess !Mixing Layer depth guessed/found for iteration [Z ~> m].
-  ! local variables, only applicable inside kappa_leanr (start)
-  real, dimension(SZK_(GV)+1) :: hz ! depth variable, only used in this routine
-  integer :: nz ! nz = GV%ke
-  integer :: K ! integer for looping
-  integer :: i,j,n ! integer for looping, local only
-  real :: p1 ! non-dimensional parameter ((B_flux * h))/(u_star^3)
-  real :: p2 ! non-dimensional parameter ((h f)/u_star ) 
-  real :: p3 ! p3 = p1 * p2 , used to find the variable sm
-  real :: sm ! sigma_max: location of maximum shape function in sigma coordinate, dimensionless
-  real :: sm_I ! inverse of sm
-  real :: sm_I2 ! 1.0/(1.0 - sm)
-  real, dimension(k_points+2) :: sig ! sigma coordinate
-  real :: x0
-
-  !integer, intent(in) :: mld_index  ! storing index where hz==mld_guess
-  integer, intent(in) :: k_points ! number of points at which shape function exists
-  real, dimension(k_points+3) :: w   !w=0 is surface, w=k_points+2 at mld_gues, w=k_points+3 is ocean bottom
-  !real, dimension(mld_index) :: SF_z  ! shape function on z grid
-  
-  real, dimension(k_points) :: kappa  ! shape function from eq-disc model, 32 are the kappa points
-
-  ! note that there 0 nad mld_index also exist in the shape function
-  real, dimension(k_points+3) :: SF  ! shape function on w grid
-
-
-  real :: x5 ! used in asymptotic model for sm
-
-  
-  hz(1)=0.0
-  do n=2,SZK_(GV)+1
-      hz(n)=hz(n-1) + h(n-1)*GV%H_to_Z
-  end do
-
-  shape_func=0.0  ! initializing the entire shape_function array
-
-  p1 = (MLD_Guess * absf)/(u_star)
-  p2 = -((B_flux * MLD_Guess))/(u_star**3)
-  p2= p2 * 2.4390 ! dividing by von-Karman constant 0.41 i.e. multiply by 2.44
-  
-
-  ! This capping does not matter because these equations are asymptotics.
-  ! but neverthless, capping has been done. Outside the caps, the output is same.
-
-  if (p1 .ge. 2.0) then 
-      p1 = 2.0
-  else
-  endif
-
-  if (p2 .le. -8.0) then 
-          p2 = -8.0
-  elseif (p2 .ge. 6.0) then
-          p2 = 6.0
-  endif
-
-  ! Empirical model to predict sm:
-  !c0,c1,c2,c3,c4,c5 = [0.05720181, 0.27277116, 0.06214072, 0.91448003, 0.49207654, 1.22461455]
-  ! the above c0,....c5 are from python script, not used, will be removed later
-  
-  ! x5 is solely function of p2
-  x5 = (0.273 / (1.0 + exp( (-p2-0.0621)/ 0.914 )) ) + 0.492
-
-  if ( abs(x5*p1) .le. 1E-05 ) then
-        sm = 0.1 ! too small value (x5 / 5721.22), will be capped below anyway. 
-  else
-        sm = x5 / ( 1.2246 + 0.0572 / (x5 * p1))
-  endif
-
-  sm = min(sm,0.7) ! makes sure sm is less than 0.7
-  sm = max(sm,0.1) ! makes sure sm is more than 0.1
-
-  sm_I = 1.0/sm ! inverse of sm
-  sm_I2 = 1.0/(1.0-sm)
-  sig = 0.0
-  call linspace(0.0, 1.0, k_points+2, sig)
-  ! print *,'sig value is >', sig
-  kappa = 0.0
-
-  do n=2,k_points+1
-     if (sig(n) .le. sm) then
-            kappa(n-1) = -(sig(n) * sm_I)**2.0 + 2.0*(sig(n)*sm_I)
-     else 
-            kappa(n-1) = 2.0 * ((sig(n)-sm)*sm_I2)**3.0 - 3.0 *((sig(n)-sm)*sm_I2)**2.0 + 1.0
-     endif 
-  end do
-  
-  !print *, 'Kappa is >', kappa
-
-  w(1)=hz(1)
-  w(k_points+2)=MLD_Guess
-  w(k_points+3)=hz(SZK_(GV)+1)
-
-  do n=2,k_points+1
-      w(n)=w(n-1) + (MLD_Guess - hz(1))/(k_points+1)
-  end do
-
-  SF(1)=0.0  ! first is zero
-  !SF(k_points+2) = 0.0  ! last is zero
-  do n=2,k_points+1
-     SF(n)=kappa(n-1) ! kappa is in right direction :D :D 
-     !SF(n)=kappa(k_points+2-n) ! because NNmodel gives reverse output :D 
-  end do
-  SF(k_points+2)=SF(k_points+1) * 0.1 ! 0.1 is required. Any non-zero number gives the same solution.
-  ! replacing 0.1 with 0.0 gives wierd evolution. 0.01, 0.001, give the same answer as 0.1
-  SF(k_points+3)=SF(k_points+2) 
-
-  call lin_interp1d(hz,shape_func, w, SF, SZK_(GV)+1 , k_points+3)
-
-  end subroutine kappa_eqdisc
-
-
-  subroutine get_eqdisc_v0(CS,absf,B_flux,u_star,MLD_guess,v0_dummy)
-      ! this subroutine gives velocity scale from neural network
-      type(energetic_PBL_CS),  intent(inout) :: CS     !< Energetic PBL control struct
-      real, intent(in) :: B_flux ! surface buoyancy flux
-      real, intent(in) :: u_star ! surface friction velocity
-      real, intent(in) :: MLD_guess ! boundary layer depth
-      real, intent(in) :: absf  ! coriolis
-      ! for capping
-      real :: bflux_c, ust_c , absf_c ! capped bflux, ustar, absf
-      ! end capping
-      real, intent(inout) :: v0_dummy   ! only velocity is the output. need to rename this later
-      real :: p1, p2, p3, p4  ! non-dimensional parameter (1/u)*(sqrt(Bflux/f)), p2 = f/Omega, omega is Earth's rotation
-      ! p3 and p4 are not non-dimensional. They are used in surface destabilizing condition
-
-      if (B_flux .le. -7.0E-07) then
-              bflux_c = -7.0E-07
-      elseif (B_flux .ge. 7.0E-07) then
-              bflux_c = 7.0E-07
-      else
-              bflux_c = B_flux
-      endif
-      
-      ust_c = u_star
-
-
-      if (absf .le. 2.5454E-06) then
-              absf_c = 2.5454E-06    ! avoiding zero coriolis, does not affect the solution
-      else
-              absf_c = absf
-      endif
-
-
-      ! setting v0_dummy here:
-
-      if (bflux_c .ge. 0.0) then ! surface heating and neutral conditions
-      
-              p1 =  -(1.0/ust_c) * sqrt(abs(bflux_c)/absf_c) 
-              v0_dummy = -0.17658/((p1-1.474)+0.330/(p1-0.449))
-
-
-      else               ! surface cooling
-             ! p1 is integral part of p3
-
-              p2 = absf_c/(7.2921E-05)
-              p3 = (0.0984/ust_c)*sqrt(abs(bflux_c)/(7.2921e-05))
-              p4 = 45* exp(-p2/0.35) + 3.29
- 
-              v0_dummy  = (p3 / ( 1 + (absf_c * p4 * ust_c * ust_c)/abs(bflux_c) )) + 0.0764 
-              
-      endif
-      
-      v0_dummy = v0_dummy * ust_c
-
-      v0_dummy=max(v0_dummy,CS%v0_lower_cap)  ! CS%v0_lower_cap
-      v0_dummy=min(v0_dummy,0.1)
-
-      !print *,'v0_dummy in get_eqdisc_v0 >', v0_dummy
-
-end subroutine get_eqdisc_v0
-
-subroutine linspace(a, b, n, array)
-    ! creates an array from a to b of size(array), including a and b.      
-    real, intent(in) :: a, b
-    integer, intent(in) :: n
-    real, intent(out) :: array(:)
-    real :: range_ab
-    integer ::  i
-    
-    range_ab = b - a
-
-    do i=1, n
-        array(i) = a+ range_ab * (i - 1) / (n - 1)
-    end do
-  end subroutine linspace
-
-  subroutine lin_interp1d(x,y,w,z, Nx, Nz)
-  ! interpolates z=f(w)  on y=g(x)
-  integer, intent(in) :: Nx, Nz ! sizes of x and w
-  real, intent(in), dimension(Nx) :: x
-  real, intent(in), dimension(Nz) :: w, z
-  real, intent(out), dimension(Nx) :: y
-  real :: m ! slope of line between 2 adjacent points of input array
-
-  integer :: i,j ! integers for looping
-  m=0.0
-
-  y(1)=z(1)
-  y(Nx)=z(Nz)
-
-  do i=2,Nx-1
-      do j=1,Nz-1
-          if ((x(i).ge.w(j)) .and. (x(i).lt.w(j+1))) then
-              m=(z(j+1)-z(j))/(w(j+1)-w(j))
-              y(i)=m*(x(i)-w(j)) + z(j)
-          endif
-      end do
-  end do
-
-end subroutine lin_interp1d
 
 !> This subroutine calculates the change in potential energy and or derivatives
 !! for several changes in an interface's diapycnal diffusivity times a timestep.
@@ -2719,26 +2436,7 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
                  units="nondim", default=0.95,  do_not_log=(CS%LT_enhance_form==No_Langmuir))
   endif
 
- !/Options related to Machine Learning Equation Discovery ! eqdisc
-  ! flag for using shape function from equation discovery - machine learning
-   call get_param(param_file, mdl, "Equation_Discovery_shape", CS%eqdisc, &
-                 "flag for activating equation discovery for sf", &
-                 units="nondim", default=.false.)
-  
-   call get_param(param_file, mdl, "Equation_Discovery_velocity", CS%eqdisc_v0, &
-                 "flag for activating equation discovery for vel uses Boundary Layer Depth", &
-                 units="nondim", default=.false.)
 
-   call get_param(param_file, mdl, "Equation_Discovery_velocity2", CS%eqdisc_v0_2, &
-                 "flag for activating equation discovery for vel compact model", &
-                 units="nondim", default=.false.)
-
-   call get_param(param_file, mdl, "v0_lower_cap", CS%v0_lower_cap, &
-                     "value of lower limit cap for v0", units="m/s", default=0.0001)
-  !/ options end for Machine Learning Equation Discovery
-
-
-  
 !/ Logging parameters
   ! This gives a minimum decay scale that is typically much less than Angstrom.
   CS%ustar_min = 2e-4*CS%omega*(GV%Angstrom_Z + GV%dZ_subroundoff)
@@ -2881,3 +2579,4 @@ end subroutine energetic_PBL_end
 !! radiation.
 
 end module MOM_energetic_PBL
+!/Options related to Machine Learning Equation Discovery ! eqdisc
