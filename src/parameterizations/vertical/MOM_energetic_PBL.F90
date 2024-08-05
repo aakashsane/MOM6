@@ -2666,24 +2666,25 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
 
  !/Options related to Machine Learning Equation Discovery ! eqdisc
   ! flag for using shape function from equation discovery - machine learning
+
    call get_param(param_file, mdl, "Equation_Discovery_shape", CS%eqdisc, &
                  "flag for activating equation discovery for sf", &
                  units="nondim", default=.false.)
-  
+
    call get_param(param_file, mdl, "Equation_Discovery_velocity", CS%eqdisc_v0, &
-                 "flag for activating equation discovery for velocity scale", &
-                 units="nondim", default=.false.)
-
+                   "flag for activating equation discovery for velocity scale", &
+                   units="nondim", default=.false.)
+  
    call get_param(param_file, mdl, "Equation_Discovery_velocity2", CS%eqdisc_v0_2, &
-                 "flag for activating equation discovery for velocity scale, uses boundary layer depth", &
-                 units="nondim", default=.false.)
+                   "flag for activating equation discovery for velocity scale, uses boundary layer depth", &
+                   units="nondim", default=.false.)
+  
+  call get_param(param_file, mdl, "CS%f_lower", CS%f_lower, &
+                       "value of lower limit cap for v0, default is for 1 deg", units="m/s", default=2.5454E-06)
+  
+  call get_param(param_file, mdl, "v0_lower_cap", CS%v0_lower_cap, &
+                       "value of lower limit cap for Coriolis in v0", units="1/s", default=0.0001)
 
-   
-   call get_param(param_file, mdl, "CS%f_lower", CS%f_lower, &
-                     "value of lower limit cap for v0, default is for 1 deg", units="m/s", default=2.5454E-06)
-
-   call get_param(param_file, mdl, "v0_lower_cap", CS%v0_lower_cap, &
-                     "value of lower limit cap for Coriolis in v0", units="1/s", default=0.0001)
   !/ options end for Machine Learning Equation Discovery
 
 
