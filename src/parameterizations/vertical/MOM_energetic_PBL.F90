@@ -2678,9 +2678,11 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
    call get_param(param_file, mdl, "Equation_Discovery_velocity2", CS%eqdisc_v0_2, &
                    "flag for activating equation discovery for velocity scale, uses boundary layer depth", &
                    units="nondim", default=.false.)
-  
+
+  ! sets a  lower cap for abs_f (Coriolis parameter) required in equation for v_0. Small value, solution not sensitive below 1 deg Latitute
+  ! Default value of 2.5384E-07 corresponds to 0.1 deg. 
   call get_param(param_file, mdl, "f_lower", CS%f_lower, &
-                       "value of lower limit cap for v0, default is for 1 deg", units="m/s", default=2.5454E-06)
+                       "value of lower limit cap for v0, default is for 0.1 deg, insensitive below 1deg", units="1/s", default=2.5384E-07 )
   
   call get_param(param_file, mdl, "v0_lower_cap", CS%v0_lower_cap, &
                        "value of lower limit cap for Coriolis in v0", units="1/s", default=0.0001)
