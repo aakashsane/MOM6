@@ -158,7 +158,7 @@ type, public :: energetic_PBL_CS ; private
   !/ Machine learned equation discovery model paramters ! eqdisc
   logical :: eqdisc, eqdisc_v0, eqdisc_v0_2 ! Machine Learned Equation discovery, eqdisc_v0_2: second set of equations for v0
 
-  real :: v0, v0_lower_cap, f_lower   ! v0 sets magnitude of kappa. Kappa ~ v0 X h, v0_lower_cap is lower cap for v_0.
+  real :: v0, v0_lower_cap, f_lower   ! v0 sets magnitude of Diffusivity ~ v0 X h, v0_lower_cap is lower cap for v_0.
   real, allocatable, dimension(:) :: shape_function
   
   !/ Coefficients used in Machine learned diffusivity
@@ -1610,7 +1610,7 @@ subroutine getshapefunction(CS,GV,h,absf,B_flux,u_star,MLD_guess,MixLen_shape)
       MixLen_shape(1) = 1.0
        
       if (CS%eqdisc .eqv. .true.) then ! update Kd as per Machine Learning equation discovery
-           call kappa_eqdisc(MixLen_shape, CS, GV, h, absf, B_flux, u_star, MLD_guess, 16)
+           call kappa_eqdisc(MixLen_shape, CS, GV, h, absf, B_flux, u_star, MLD_guess)
       
 
       else
@@ -1634,7 +1634,7 @@ subroutine getshapefunction(CS,GV,h,absf,B_flux,u_star,MLD_guess,MixLen_shape)
 
 end subroutine getshapefunction
 
-subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, k_points)
+subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
   real, dimension(SZK_(GV)+1), intent(inout) :: shape_func  ! shape function
@@ -1656,17 +1656,6 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, 
   real :: sm ! sigma_max: location of maximum of shape function in sigma coordinate, dimensionless
   real :: sm_I ! inverse of sm
   real :: sm_I2 ! 1.0/(1.0 - sm)
-  real, dimension(k_points+2) :: sig ! sigma coordinate
-  real :: x0
-
-  !integer, intent(in) :: k_points ! number of points at which shape function exists
-  !real, dimension(k_points+3) :: w   !w=0 is surface, w=k_points+2 at mld_gues, w=k_points+3 is ocean bottom
-  !real, dimension(mld_index) :: SF_z  ! shape function on z grid
-  
-  !real, dimension(k_points) :: kappa  ! shape function from eq-disc model, 32 are the kappa points
-
-  ! note that there 0 nad mld_index also exist in the shape function
-  !real, dimension(k_points+3) :: SF  ! shape function on w grid
 
   real :: hbl ! BOundary layer depth, same as MLD_guess, metres
 
@@ -1682,7 +1671,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, 
 
   p1 = (hbl * absf)/(u_star)   ! Boundary layer depth divided by Ekman depth
   p2 = -((B_flux * hbl))/(u_star**3) ! Boundary layer depth divided by Monin-Obukhov depth
-  p2= p2 * 2.4390 ! dividing by von-Karman constant 0.41 i.e. multiply by 2.44
+  p2= p2 * 2.4390 ! dividing by von-Karman constant 0.41 i.e. multiply by 2.4390
   
 
   ! This capping does not matter because these equations have asymptotics.
@@ -1799,7 +1788,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess, 
              ! p1 is integral part of p3
 
               p2 = absf_c/(7.2921E-05)
-              p3 = (CS%c12/ust_c)*sqrt(abs(bflux_c)/(7.2921e-05))
+              p3 = (CS%c12/ust_c)*sqrt(abs(bflux_c)/(7.2921e-05)) ! 7.2921e-05/s is Omega, Earth rotation
               p4 = CS%c13 * exp(-p2/ CS%c14) + CS%c15
 
               p4 =  1 + (absf_c * p4 * ust_c * ust_c)/abs(bflux_c) 
