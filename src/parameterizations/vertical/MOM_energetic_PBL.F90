@@ -156,7 +156,7 @@ type, public :: energetic_PBL_CS ; private
   real :: Max_Enhance_M = 5. !< The maximum allowed LT enhancement to the mixing [nondim].
 
   !/ Machine learned equation discovery model paramters ! eqdisc
-  logical :: eqdisc, eqdisc_v0, eqdisc_v0_2 ! Machine Learned Equation discovery, eqdisc_v0_2: second set of equations for v0
+  logical :: eqdisc, eqdisc_v0  ! Machine Learned Equation discovery
 
   real :: v0, v0_lower_cap, f_lower   ! v0 sets magnitude of Diffusivity ~ v0 X h, v0_lower_cap is lower cap for v_0.
   real, allocatable, dimension(:) :: shape_function
@@ -1001,9 +1001,6 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
           if (CS%eqdisc_v0 .eqv. .true.) then
                   call get_eqdisc_v0(CS,absf,B_flux,u_star,MLD_guess,v0_dummy)
                   CS%v0 = v0_dummy
-
-          ! eqdisc_v0_2 will be done later
-          ! eqdisc_v0_2 uses Boundary Layer Depth as input. Will be added later
                  
           else
           endif
@@ -1645,14 +1642,14 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
 
   real, dimension(SZK_(GV)),intent(in) :: h   ! The layer thickness [H ~> m or kg m-2].
   real, intent(in) :: MLD_guess !Mixing Layer depth guessed/found for iteration [Z ~> m].
+
   ! local variables for this subroutine
   real, dimension(SZK_(GV)+1) :: hz ! depth variable, only used in this routine
   integer :: nz ! nz = GV%ke
   integer :: K ! integer for looping
   integer :: i,j,n ! integer for looping, local only
-  real :: p1 ! non-dimensional parameter ((B_flux * h))/(u_star^3)
-  real :: p2 ! non-dimensional parameter ((h f)/u_star ) 
-  real :: p3 ! p3 = p1 * p2 
+  real :: p1 ! non-dimensional parameter ((B_flux * h))/(u_star^3), boundary layer depth by M-O depth
+  real :: p2 ! non-dimensional parameter ((h f)/u_star ),  boundary layer depth by Ekman depth
   real :: sm ! sigma_max: location of maximum of shape function in sigma coordinate, dimensionless
   real :: sm_I ! inverse of sm
   real :: sm_I2 ! 1.0/(1.0 - sm)
@@ -1660,6 +1657,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   real :: hbl ! BOundary layer depth, same as MLD_guess, metres
 
   real :: F ! function, used in asymptotic model for sm, Equation 7 in Sane et al. 2024
+  real :: F_I ! Inverse of F
 
   
   hz(1)=0.0
@@ -1670,11 +1668,13 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   shape_func=0.0  ! initializing the entire shape_function array
 
   p1 = (hbl * absf)/(u_star)   ! Boundary layer depth divided by Ekman depth
-  p2 = -((B_flux * hbl))/(u_star**3) ! Boundary layer depth divided by Monin-Obukhov depth
+  p2 = ((-B_flux * hbl))/(u_star**3) ! Boundary layer depth divided by Monin-Obukhov depth
+  ! B_flux made negative to follow convention used in Sane et al. 2023,2024
+  ! p2 < 0 --> surface stabilizing i.e. heating, and p2 > 0 --> surface destabilizing i.e. cooling
   p2= p2 * 2.4390 ! dividing by von-Karman constant 0.41 i.e. multiply by 2.4390
   
 
-  ! This capping does not matter because these equations have asymptotics.
+  ! This capping does not matter because these equations have asymptotes.
   ! but neverthless, capping has been done. Not sensitive beyond the caps.
   if (p1 .ge. 2.0) then 
       p1 = 2.0
@@ -1682,18 +1682,21 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   endif
   if (p2 .le. -8.0) then 
           p2 = -8.0
-  elseif (p2 .ge. 6.0) then
-          p2 = 6.0
+  elseif (p2 .ge. 8.0) then
+          p2 = 8.0
   endif
 
   ! Empirical model to predict sm:
   ! F1 is solely function of p2
+
   F = (CS%c4 / (CS%c5 + exp( (-p2-CS%c6)/ CS%c7 )) ) + CS%c8
+
+  F_I = 1.0 / ( F*p1 )
 
   if ( abs(F*p1) .le. 1E-05 ) then
         sm = 0.1 ! too small value (F / 5721.22), will be capped below anyway. 
   else
-        sm = CS%c3 / (F * p1)
+        sm = CS%c3 * F_I
         sm = CS%c2 + sm
         sm = CS%c1 / sm
   endif
@@ -1701,23 +1704,28 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   sm = min(sm,0.7) ! makes sure sm is less than 0.7
   sm = max(sm,0.1) ! makes sure sm is more than 0.1
 
-  sm= sm * hbl ! peak of shape function in model vertical coordinate
+  sm= sm * hbl ! peak of shape function in model vertical coordinate, or peak of shape function in z coordinate
 
 
   sm_I = 1.0/sm ! inverse of sm x hbl
   sm_I2 = 1.0/(hbl-sm)  ! inverse of (hbl-sm)
 
-  shape_func(:) = 0.0 
-
   ! gives the shape, quadratic above sm, cubic below sm. 
   ! see Equation 8 in Sane et al. 2024
+  ! interpolates a quadratic function from z=0 to z=sm*hbl, and then a cubic from z=sm*hbl to z=hbl
+
+  shape_func(:) = 0.0 
   do n=2,SZK_(GV)+1
      if     (hz(n) .le. sm) then
             shape_func(n) = -(hz(n) * sm_I)**2.0 + 2.0*(hz(n)*sm_I)
      elseif  ((hz(n) .gt. sm) .and. (hz(n) .le. hbl)) then
             shape_func(n) =  ( (1.99 * ((hz(n)-sm)*sm_I2)**3.0) - ( 2.98 *((hz(n)-sm)*sm_I2)**2.0 ) ) + 1.0
+            ! the coefficients 1.99 and 2.98 are dependent on the below value of 0.01. 
+            ! They smoothly make the cubic go towards 0.01 below hbl.
      elseif ((hz(n) .gt. hbl)) then
-            shape_func(n) = 0.01
+            shape_func(n) = 0.01 ! we set an arbitrary low value of 0.01
+            ! This value should be small such as 0.01, or 0.001. Result is not sensitive.
+            ! result is only sensitive when the value is set to be exactly 0.0
 
      endif
   end do
@@ -1767,37 +1775,33 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
       ! setting v0_dummy here:
 
       if (bflux_c .ge. 0.0) then ! surface heating and neutral conditions
+
       ! Equation 10 in Sane et al. 2024:
       ! \frac{v}{u_*} = \frac{-c_9}{p_1 + c_{10} + \frac{c_{11}^2}{p_1 - c_{11}} }
       
               p1 =  -(1.0/ust_c) * sqrt(abs(bflux_c)/absf_c) 
-
               p3 = (CS%c11**2.0) / (p1-CS%c11)
               p4 = (p1+CS%c10) + p3
-
               v0_dummy = -CS%c9/p4
         
-
-
-
       else               ! surface cooling
       ! Equation 11 in Sane et al. 2024:
       ! 
       !     \frac{v}{u_*}=\frac{c_{12} p_1 \cdot \sqrt{p_2} }{1 +  ...
       ! \frac{(c_{13} e^{(-p_2/c_{14})} + c_{15}) }{p_1 ^2} }
-             ! p1 is integral part of p3
+             ! p1 is merged in p3
 
               p2 = absf_c/(7.2921E-05)
               p3 = (CS%c12/ust_c)*sqrt(abs(bflux_c)/(7.2921e-05)) ! 7.2921e-05/s is Omega, Earth rotation
-              p4 = CS%c13 * exp(-p2/ CS%c14) + CS%c15
 
+              p4 = CS%c13 * exp(-p2/ CS%c14) + CS%c15
               p4 =  1 + (absf_c * p4 * ust_c * ust_c)/abs(bflux_c) 
  
               v0_dummy  = (p3 / p4 ) + CS%c16 
               
       endif
       
-      v0_dummy = v0_dummy * ust_c
+      v0_dummy = v0_dummy * ust_c ! v0_dummy = v/u*, so it is multiplied by ust_c to get v0
 
       v0_dummy=max(v0_dummy,CS%v0_lower_cap)  ! CS%v0_lower_cap
       ! v0_lower_cap has been set to 0.0001 as data below that values does not exist in the training
