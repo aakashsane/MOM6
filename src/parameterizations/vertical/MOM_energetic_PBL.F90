@@ -156,15 +156,15 @@ type, public :: energetic_PBL_CS ; private
   real :: Max_Enhance_M = 5. !< The maximum allowed LT enhancement to the mixing [nondim].
 
   !/ Machine learned equation discovery model paramters ! eqdisc
-  logical :: eqdisc, eqdisc_v0  ! Machine Learned Equation discovery
-
-  real :: v0, v0_lower_cap, f_lower   ! v0 sets magnitude of Diffusivity ~ v0 X h, v0_lower_cap is lower cap for v_0.
-  real, allocatable, dimension(:) :: shape_function
-  
-  !/ Coefficients used in Machine learned diffusivity
-  !/ Correspond to Equations 6,7,10,11 in Sane et al. 2024
-  real :: c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16 ! Non-dimensional constants
-
+  logical :: eqdisc, eqdisc_v0  ! Machine Learned Equation discovery - shape function and velocity-scale
+  real :: v0 ! <v0 velocity scale from machine learning (GLSscheme) used for diffusivity [Z T-1 ~> m s-1]
+  real :: v0_lower_cap ! Lower cap to prevent v0 from attaining anomlously low values [Z T-1 ~> m s-1]
+  real :: f_lower ! Lower cap of |f| i.e. absolute of Coriolis parameter.
+                  ! Used in v0 subroutines. Default at 0.1deg Lat
+  real, allocatable, dimension(:) :: shape_function ! shape function used in machine learned diffusivity [nondim]
+  !/ Coefficients used in Machine learned diffusivity, Equations 6,7,10,11 in Sane et al. 2024
+  real :: c1, c2, c3, c4, c5, c6, c7, c8, c9  ! Non-dimensional constants
+  real :: c10, c11, c12, c13, c14, c15, c16   ! used in getting v0 and shape function [nondim]
   !/ Others
   type(time_type), pointer :: Time=>NULL() !< A pointer to the ocean model's clock.
 
@@ -994,23 +994,14 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
       else
 
       call getshapefunction(CS,GV,h,absf,B_flux,u_star,MLD_guess,MixLen_shape) ! used for ML-eqdisc
-          
           v0_dummy = 0.0 ! a variable that gets passed on to subroutine get_eqdisc_v0
           CS%v0=0.0
-  
           if (CS%eqdisc_v0 .eqv. .true.) then
                   call get_eqdisc_v0(CS,absf,B_flux,u_star,MLD_guess,v0_dummy)
                   CS%v0 = v0_dummy
-                 
           else
           endif
-
       endif
-
-
-
-
-
 
       Kd(1) = 0.0 ; Kddt_h(1) = 0.0
       hp_a = h(1)
@@ -1648,20 +1639,19 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   integer :: nz ! nz = GV%ke
   integer :: K ! integer for looping
   integer :: i,j,n ! integer for looping, local only
-  real :: p1 ! non-dimensional parameter ((B_flux * h))/(u_star^3), boundary layer depth by M-O depth
-  real :: p2 ! non-dimensional parameter ((h f)/u_star ),  boundary layer depth by Ekman depth
-  real :: sm ! sigma_max: location of maximum of shape function in sigma coordinate, dimensionless
-  real :: sm_I ! inverse of sm
-  real :: sm_I2 ! 1.0/(1.0 - sm)
+  real :: p1 ! ((B_flux * h))/(u_star^3), boundary layer depth by M-O depth, nondim
+  real :: p2 ! ((h f)/u_star ),  boundary layer depth by Ekman depth, nondim
+  real :: sm ! sigma_max: location of maximum of shape function in sigma coordinate, nondim
+  real :: sm_I ! inverse of sm, nondim
+  real :: sm_I2 ! 1.0/(1.0 - sm), nondim
+  real :: hbl ! Boundary layer depth, same as MLD_guess [Z ~> m]
+  real :: F ! function, used in asymptotic model for sm, Equation 7 in Sane et al. 2024, nondim 
+  real :: F_I ! Inverse of F, nondim
+  real :: Fp1 ! = F*p1, nondim
 
-  real :: hbl ! BOundary layer depth, same as MLD_guess, metres
-
-  real :: F ! function, used in asymptotic model for sm, Equation 7 in Sane et al. 2024
-  real :: F_I ! Inverse of F
-
-  
+  nz = SZK_(GV)+1
   hz(1)=0.0
-  do n=2,SZK_(GV)+1
+  do n=2,nz
       hz(n)=hz(n-1) + h(n-1)*GV%H_to_Z
   end do
   hbl = MLD_Guess ! hbl is boundary layer depth. 
@@ -1671,51 +1661,33 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   p2 = ((-B_flux * hbl))/(u_star**3) ! Boundary layer depth divided by Monin-Obukhov depth
   ! B_flux made negative to follow convention used in Sane et al. 2023,2024
   ! p2 < 0 --> surface stabilizing i.e. heating, and p2 > 0 --> surface destabilizing i.e. cooling
-  p2= p2 * 2.4390 ! dividing by von-Karman constant 0.41 i.e. multiply by 2.4390
-  
-
-  ! This capping does not matter because these equations have asymptotes.
-  ! but neverthless, capping has been done. Not sensitive beyond the caps.
-  if (p1 .ge. 2.0) then 
-      p1 = 2.0
-  else 
-  endif
-  if (p2 .le. -8.0) then 
-          p2 = -8.0
-  elseif (p2 .ge. 8.0) then
-          p2 = 8.0
-  endif
-
+  p2 = p2 * 2.4390 ! dividing by von-Karman constant 0.41 i.e. multiply by 2.4390
+  ! This capping does not matter because these equations have asymptotes. Not sensitive beyond the caps.
+  p1 = min(p1, 2.0) ! capping p1 to less than 2.0. It is always >0.0.
+  p2 = max(p2, -8.0) ! capping p2 to -8.0 if less than -8.0
+  p2 = min(p2,  8.0) ! capping p2 to 8.0 if > 8.0
   ! Empirical model to predict sm:
   ! F1 is solely function of p2
-
-  F = (CS%c4 / (CS%c5 + exp( (-p2-CS%c6)/ CS%c7 )) ) + CS%c8
-
-  F_I = 1.0 / ( F*p1 )
-
-  if ( abs(F*p1) .le. 1E-05 ) then
-        sm = 0.1 ! too small value (F / 5721.22), will be capped below anyway. 
-  else
-        sm = CS%c3 * F_I
-        sm = CS%c2 + sm
-        sm = CS%c1 / sm
-  endif
-
-  sm = min(sm,0.7) ! makes sure sm is less than 0.7
+  F = exp( (-p2-CS%c6)/ CS%c7 ) ! F = (CS%c4 / (CS%c5 + exp( (-p2-CS%c6)/ CS%c7 )) ) + CS%c8
+  F = CS%c5 + F
+  F = CS%c4 / F
+  F = F + CS%c8
+  Fp1 = F*p1
+  Fp1 = max(Fp1, 1E-05) ! an arbitrary small value to cap Fp1, result insensitive below that value
+  F_I = 1.0 / ( Fp1 )
+  sm = CS%c2 + (CS%c3 * F_I)
+  sm = CS%c1 / sm 
+  sm = min(sm,0.7) ! makes sure sm is less than 0.7, data ranges from 0.2 to 0.60
   sm = max(sm,0.1) ! makes sure sm is more than 0.1
-
-  sm= sm * hbl ! peak of shape function in model vertical coordinate, or peak of shape function in z coordinate
-
-
+  sm= sm * hbl ! peak of shape function in model vertical coordinate z, or peak of shape function in z coordinate
   sm_I = 1.0/sm ! inverse of sm x hbl
-  sm_I2 = 1.0/(hbl-sm)  ! inverse of (hbl-sm)
-
+  sm_I2 = 1.0/(hbl-sm)  ! inverse of (hbl-sm), as 0.1<sm<0.7, hbl>sm, hence (hbl-sm) always >0.0
+  
   ! gives the shape, quadratic above sm, cubic below sm. 
   ! see Equation 8 in Sane et al. 2024
   ! interpolates a quadratic function from z=0 to z=sm*hbl, and then a cubic from z=sm*hbl to z=hbl
-
   shape_func(:) = 0.0 
-  do n=2,SZK_(GV)+1
+  do n=2,nz
      if     (hz(n) .le. sm) then
             shape_func(n) = -(hz(n) * sm_I)**2.0 + 2.0*(hz(n)*sm_I)
      elseif  ((hz(n) .gt. sm) .and. (hz(n) .le. hbl)) then
