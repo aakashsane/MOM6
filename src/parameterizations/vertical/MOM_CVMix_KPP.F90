@@ -124,6 +124,16 @@ type, public :: KPP_CS ; private
                                        !! from early in 2024, while higher values use expressions
                                        !! that have been refactored for rotational symmetry.
 
+  logical :: ML_diffusivity            !!< Flag to switch on machine learned diffusivity 
+  real :: v0 ! <v0 velocity scale from machine learning (GLSscheme) used for diffusivity [Z T-1 ~> m s-1]
+  real :: v0_lower_cap ! Lower cap to prevent v0 from attaining anomlously low values [Z T-1 ~> m s-1]
+  real :: f_lower ! Lower cap of |f| i.e. absolute of Coriolis parameter.
+                  ! Used in v0 subroutines. Default at 0.1deg Lat
+  !real, allocatable, dimension(:) :: shape_function ! shape function used in machine learned diffusivity [nondim]
+  !/ Coefficients used in Machine learned diffusivity, Equations 6,7,10,11 in Sane et al. 2024
+  real :: c1, c2, c3, c4, c5, c6, c7, c8, c9  ! Non-dimensional constants
+  real :: c10, c11, c12, c13, c14, c15, c16   ! used in getting v0 and shape function [nondim]
+
   !> CVMix parameters
   type(CVMix_kpp_params_type), pointer :: KPP_params => NULL()
 
@@ -320,6 +330,62 @@ logical function KPP_init(paramFile, G, GV, US, diag, Time, CS, passive)
                  '\t CUBIC     - A cubic profile, (1-sigma)^2(1+2*sigma)\n'//                  &
                  '\t CUBIC_LMD - The original KPP profile',                                    &
                  default='CVMix')
+
+  ! The coefficients used for machine learned diffusivity
+  call get_param(paramFile, mdl, 'ML_DIFFUSIVITY', CS%ML_diffusivity,       &
+                 'Use machine learned diffusivity ', &
+                 default=.False.)
+
+  if (CS%ML_diffusivity) then
+
+      call get_param(paramFile, mdl, "f_lower", CS%f_lower, &
+                           "value of lower limit cap for v0, default is for 0.1 deg, insensitive , & 
+                            below 1deg", units="1/s", default=2.5384E-07 )
+  
+      call get_param(paramFile, mdl, "v0_lower_cap", CS%v0_lower_cap, &
+                           "value of lower limit cap for Coriolis in v0", & 
+                           units="1/s", default=0.0001)
+  ! c1 to c8 used for sigma_m, 
+      call get_param(paramFile, mdl, "c1", CS%c1, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=0.976)
+      call get_param(paramFile, mdl, "c2", CS%c2, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=1.743)
+      call get_param(paramFile, mdl, "c3", CS%c3, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=1.551)
+      call get_param(paramFile, mdl, "c4", CS%c4, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=0.943)
+      call get_param(paramFile, mdl, "c5", CS%c5, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=0.016)
+      call get_param(paramFile, mdl, "c6", CS%c6, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=0.693)
+      call get_param(paramFile, mdl, "c7", CS%c7, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=0.379)
+      call get_param(paramFile, mdl, "c8", CS%c8, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=2.194)
+      
+      ! coefficients related to surface heating v_0, obtained using Genetic Programming
+      call get_param(paramFile, mdl, "c9", CS%c9, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=0.1426)
+      call get_param(paramFile, mdl, "c10", CS%c10, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=0.0434)
+      call get_param(paramFile, mdl, "c11", CS%c11, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=1.80)
+    
+      ! coefficients related to surface cooling v_0, obtained by empirical fitting (brain)
+      call get_param(paramFile, mdl, "c12", CS%c12, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=0.098)
+      call get_param(paramFile, mdl, "c13", CS%c13, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=45.0)
+      call get_param(paramFile, mdl, "c14", CS%c14, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=0.35)
+      call get_param(paramFile, mdl, "c15", CS%c15, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=3.29)
+      call get_param(paramFile, mdl, "c16", CS%c16, &
+                           "Coefficient used for ML diffusivity,  ", units="nondim", default=0.0764)
+  endif
+
+  !/ options end for Machine Learning Equation Discovery
+  
   select case ( trim(string) )
     case ("CVMix")     ; CS%NLT_shape = NLT_SHAPE_CVMix
     case ("LINEAR")    ; CS%NLT_shape = NLT_SHAPE_LINEAR
@@ -471,7 +537,7 @@ logical function KPP_init(paramFile, G, GV, US, diag, Time, CS, passive)
                    'Constant value to enhance VT2 in KPP.',  &
                    units="nondim", default=1.0)
     endif
-  endif
+  endif  
 
   if (CS%LT_K_ENHANCEMENT .or. CS%LT_VT2_ENHANCEMENT) then
     call get_param(paramFile, mdl, "KPP_LT_MLD_GUESS_MIN", CS%MLD_guess_min,     &
@@ -657,6 +723,9 @@ subroutine KPP_calculate(CS, G, GV, US, h, tv, uStar, buoyFlux, Kt, Ks, Kv, &
   real :: dh    ! The local thickness used for calculating interface positions [Z ~> m]
   real :: hcorr ! A cumulative correction arising from inflation of vanished layers [Z ~> m]
 
+  real :: Coriolis ! the coriolis parameter
+  real, dimension(GV%ke+1) :: shape_function ! shape function used in machine learned diffusivity [nondim]
+
   ! For Langmuir Calculations
   real :: LangEnhK     ! Langmuir enhancement for mixing coefficient [nondim]
 
@@ -693,6 +762,8 @@ subroutine KPP_calculate(CS, G, GV, US, h, tv, uStar, buoyFlux, Kt, Ks, Kv, &
     do i = G%isc, G%iec ; if (G%mask2dT(i,j) > 0.0) then
 
       ! things independent of position within the column
+      Coriolis = 0.25*US%s_to_T*( (G%CoriolisBu(i,j)   + G%CoriolisBu(i-1,j-1)) + &
+                                  (G%CoriolisBu(i-1,j) + G%CoriolisBu(i,j-1)) ) ! added Coriolis for ML-diffusivity
       surfFricVel = US%Z_to_m*US%s_to_T * uStar(i,j)
 
       iFaceHeight(1) = 0.0 ! BBL is all relative to the surface
@@ -806,6 +877,22 @@ subroutine KPP_calculate(CS, G, GV, US, h, tv, uStar, buoyFlux, Kt, Ks, Kv, &
                             Langmuir_EFactor=LangEnhK,& ! Langmuir enhancement multiplier
                             CVMix_kpp_params_user=CS%KPP_params )
 
+      ! B=surfBuoyFlux <0 is convection , ustar = surfFricVel, ff=40deg latitude, h = CS%OBLdepth(i,j)
+      if (CS%ML_diffusivity) then
+        !print *,"Is this working?"
+        shape_function(:) = 0.0
+        call kappa_eqdisc(shape_function, CS, GV, h, Coriolis, surfBuoyFlux, surfFricVel, CS%OBLdepth(i,j))
+        CS%v0=0.0 ! velocity scale
+        call get_eqdisc_v0(CS,Coriolis,surfBuoyFlux,surfFricVel,CS%OBLdepth(i,j),CS%v0) 
+                                    
+        do k = 2, GV%ke ! setting the diffusivity, viscosoty = heat diffusivity = salt diffusivity! 
+          Kviscosity(k) = shape_function(k) * CS%v0 * CS%OBLdepth(i,j)
+          Kdiffusivity(k,1) = shape_function(k) * CS%v0 * CS%OBLdepth(i,j)
+          Kdiffusivity(k,2) = shape_function(k) * CS%v0 * CS%OBLdepth(i,j)
+        enddo 
+
+      endif
+
       ! safety check, Kviscosity and Kdiffusivity must be >= 0
       do k=1, GV%ke+1
         if (Kviscosity(k) < 0. .or. Kdiffusivity(k,1) < 0.) then
@@ -831,6 +918,7 @@ subroutine KPP_calculate(CS, G, GV, US, h, tv, uStar, buoyFlux, Kt, Ks, Kv, &
                    "You might consider using the default options for these parameters." )
         endif
       enddo
+
 
       ! Over-write CVMix NLT shape function with one of the following choices.
       ! The CVMix code has yet to update for thse options, so we compute in MOM6.
@@ -1563,6 +1651,170 @@ subroutine KPP_NonLocalTransport_saln(CS, G, GV, h, nonLocalTrans, surfFlux, dt,
 
 end subroutine KPP_NonLocalTransport_saln
 
+! Machine learning related subroutines:
+
+subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
+  type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
+  type(KPP_CS),  intent(in) :: CS     !< Energetic PBL control struct
+  real, dimension(SZK_(GV)+1), intent(inout) :: shape_func  ! shape function
+
+  real, intent(in) :: absf      ! The absolute value of f [T-1 ~> s-1].
+  real, intent(in) :: u_star    ! The surface friction velocity [Z T-1 ~> m s-1].
+  real, intent(in) :: B_Flux    ! The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
+
+  real, dimension(SZK_(GV)),intent(in) :: h   ! The layer thickness [H ~> m or kg m-2].
+  real, intent(in) :: MLD_guess !Mixing Layer depth guessed/found for iteration [Z ~> m].
+
+  ! local variables for this subroutine
+  real, dimension(SZK_(GV)+1) :: hz ! depth variable, only used in this routine
+  integer :: nz ! nz = GV%ke
+  integer :: K ! integer for looping
+  integer :: i,j,n ! integer for looping, local only
+  real :: p1 ! ((B_flux * h))/(u_star^3), boundary layer depth by M-O depth, nondim
+  real :: p2 ! ((h f)/u_star ),  boundary layer depth by Ekman depth, nondim
+  real :: sm ! sigma_max: location of maximum of shape function in sigma coordinate, nondim
+  real :: sm_I ! inverse of sm, nondim
+  real :: sm_I2 ! 1.0/(1.0 - sm), nondim
+  real :: hbl ! Boundary layer depth, same as MLD_guess [Z ~> m]
+  real :: F ! function, used in asymptotic model for sm, Equation 7 in Sane et al. 2024, nondim 
+  real :: F_I ! Inverse of F, nondim
+  real :: Fp1 ! = F*p1, nondim
+
+  nz = SZK_(GV)+1
+  hz(1)=0.0
+  do n=2,nz
+      hz(n)=hz(n-1) + h(n-1)*GV%H_to_Z
+  end do
+  hbl = MLD_Guess ! hbl is boundary layer depth. 
+  shape_func(:)=0.0  ! initializing the entire shape_function array
+
+  p1 = (hbl * absf)/(u_star)   ! Boundary layer depth divided by Ekman depth
+  p2 = ((-B_flux * hbl))/(u_star**3) ! Boundary layer depth divided by Monin-Obukhov depth
+  ! B_flux made negative to follow convention used in Sane et al. 2023,2024
+  ! p2 < 0 --> surface stabilizing i.e. heating, and p2 > 0 --> surface destabilizing i.e. cooling
+  p2 = p2 * 2.4390 ! dividing by von-Karman constant 0.41 i.e. multiply by 2.4390
+  ! This capping does not matter because these equations have asymptotes. Not sensitive beyond the caps.
+  p1 = min(p1, 2.0) ! capping p1 to less than 2.0. It is always >0.0.
+  p2 = max(p2, -8.0) ! capping p2 to -8.0 if less than -8.0
+  p2 = min(p2,  8.0) ! capping p2 to 8.0 if > 8.0
+  ! Empirical model to predict sm:
+  ! F1 is solely function of p2
+  F = exp( (-p2-CS%c6)/ CS%c7 ) ! F = (CS%c4 / (CS%c5 + exp( (-p2-CS%c6)/ CS%c7 )) ) + CS%c8
+  F = CS%c5 + F
+  F = CS%c4 / F
+  F = F + CS%c8
+  Fp1 = F*p1
+  Fp1 = max(Fp1, 1E-05) ! an arbitrary small value to cap Fp1, result insensitive below that value
+  F_I = 1.0 / ( Fp1 )
+  sm = CS%c2 + (CS%c3 * F_I)
+  sm = CS%c1 / sm 
+  sm = min(sm,0.7) ! makes sure sm is less than 0.7, data ranges from 0.2 to 0.60
+  sm = max(sm,0.1) ! makes sure sm is more than 0.1
+  sm= sm * hbl ! peak of shape function in model vertical coordinate z, or peak of shape function in z coordinate
+  sm_I = 1.0/sm ! inverse of sm x hbl
+  sm_I2 = 1.0/(hbl-sm)  ! inverse of (hbl-sm), as 0.1<sm<0.7, hbl>sm, hence (hbl-sm) always >0.0
+  
+  ! gives the shape, quadratic above sm, cubic below sm. 
+  ! see Equation 8 in Sane et al. 2024
+  ! interpolates a quadratic function from z=0 to z=sm*hbl, and then a cubic from z=sm*hbl to z=hbl
+  shape_func(:) = 0.0 
+  do n=2,nz
+     if     (hz(n) .le. sm) then
+            shape_func(n) = -(hz(n) * sm_I)**2.0 + 2.0*(hz(n)*sm_I)
+     elseif  ((hz(n) .gt. sm) .and. (hz(n) .le. hbl)) then
+            shape_func(n) =  ( (1.99 * ((hz(n)-sm)*sm_I2)**3.0) - ( 2.98 *((hz(n)-sm)*sm_I2)**2.0 ) ) + 1.0
+            ! the coefficients 1.99 and 2.98 are dependent on the below value of 0.01. 
+            ! They smoothly make the cubic go towards 0.01 below hbl.
+     elseif ((hz(n) .gt. hbl)) then
+            shape_func(n) = 0.01 ! we set an arbitrary low value of 0.01
+            ! This value should be small such as 0.01, or 0.001. Result is not sensitive.
+            ! result is only sensitive when the value is set to be exactly 0.0
+
+     endif
+  end do
+
+  end subroutine kappa_eqdisc
+
+subroutine get_eqdisc_v0(CS,absf,B_flux,u_star,MLD_guess,v0_dummy)
+      ! this subroutine gives velocity scale from neural network
+      type(KPP_CS),  intent(inout) :: CS     !< Energetic PBL control struct
+      real, intent(in) :: B_flux ! surface buoyancy flux
+      real, intent(in) :: u_star ! surface friction velocity
+      real, intent(in) :: MLD_guess ! boundary layer depth
+      real, intent(in) :: absf  ! coriolis
+      ! for capping
+      real :: bflux_c, ust_c , absf_c ! capped bflux, ustar, absf
+      ! end capping
+      real, intent(inout) :: v0_dummy   ! only velocity is the output. need to rename this later
+      real :: p1, p2, p3, p4  ! non-dimensional parameter (1/u)*(sqrt(Bflux/f)), p2 = f/Omega, omega is Earth's rotation
+      ! p3 and p4 are not non-dimensional. They are used to simplify the code
+
+      ! from Sane et al. 2024: 
+      ! " p_1 &= \frac{a}{u_*} \sqrt{\frac{|B|}{f}}, \\ %= \sqrt{ \frac{L_{Ek}}{L_{MO}}}  \\
+      !   p_2 &= \frac{f}{\Omega},
+      !   Where $a = -1$ for $B \leq 0$ and $a = 1$ for $B > 0$ to distinguish between 
+      !  surface heating and cooling conditions. " 
+
+      if (B_flux .le. -7.0E-07) then
+              bflux_c = -7.0E-07
+      elseif (B_flux .ge. 7.0E-07) then
+              bflux_c = 7.0E-07
+      else
+              bflux_c = B_flux
+      endif
+      
+      ust_c = u_star
+
+
+      if (absf .le. CS%f_lower) then   ! 
+              absf_c = CS%f_lower    ! 0.1 deg Latitude, cap avoids zero coriolis, 
+                                     ! does not affect the solution
+      else
+              absf_c = absf
+      endif
+
+
+      ! setting v0_dummy here:
+
+      if (bflux_c .ge. 0.0) then ! surface heating and neutral conditions
+
+      ! Equation 10 in Sane et al. 2024:
+      ! \frac{v}{u_*} = \frac{-c_9}{p_1 + c_{10} + \frac{c_{11}^2}{p_1 - c_{11}} }
+      
+              p1 =  -(1.0/ust_c) * sqrt(abs(bflux_c)/absf_c) 
+              p3 = (CS%c11**2.0) / (p1-CS%c11)
+              p4 = (p1+CS%c10) + p3
+              v0_dummy = -CS%c9/p4
+        
+      else               ! surface cooling
+      ! Equation 11 in Sane et al. 2024:
+      ! 
+      !     \frac{v}{u_*}=\frac{c_{12} p_1 \cdot \sqrt{p_2} }{1 +  ...
+      ! \frac{(c_{13} e^{(-p_2/c_{14})} + c_{15}) }{p_1 ^2} }
+             ! p1 is merged in p3
+
+              p2 = absf_c/(7.2921E-05)
+              p3 = (CS%c12/ust_c)*sqrt(abs(bflux_c)/(7.2921e-05)) ! 7.2921e-05/s is Omega, Earth rotation
+
+              p4 = CS%c13 * exp(-p2/ CS%c14) + CS%c15
+              p4 =  1 + (absf_c * p4 * ust_c * ust_c)/abs(bflux_c) 
+ 
+              v0_dummy  = (p3 / p4 ) + CS%c16 
+              
+      endif
+      
+      v0_dummy = v0_dummy * ust_c ! v0_dummy = v/u*, so it is multiplied by ust_c to get v0
+
+      v0_dummy=max(v0_dummy,CS%v0_lower_cap)  ! CS%v0_lower_cap
+      ! v0_lower_cap has been set to 0.0001 as data below that values does not exist in the training
+      ! solution was tested for lower cap of 0.00001 and was found to be insensitive. 
+      ! sensitivity arises when lower cap is 0.0. That is when diffusivity attains extremely low values and 
+      ! they go near molecular diffusivity. Boundary layers might become "sub-grid" some cause issues such as anomlous surface warming. 
+      ! this needs further investigation, our choices are motivated by practicallity for now.
+
+      v0_dummy=min(v0_dummy,0.1) ! kept for safety, but has never hit this cap. 
+
+end subroutine get_eqdisc_v0
 
 !> Clear pointers, deallocate memory
 subroutine KPP_end(CS)
