@@ -161,6 +161,7 @@ type, public :: energetic_PBL_CS ; private
   real :: v0_lower_cap ! Lower cap to prevent v0 from attaining anomlously low values [Z T-1 ~> m s-1]
   real :: f_lower ! Lower cap of |f| i.e. absolute of Coriolis parameter.
                   ! Used in v0 subroutines. Default at 0.1deg Lat
+  real :: bflux_lower_cap, bflux_upper_cap ! Lower and upper cap for capping blfux while setting v0. 
   real, allocatable, dimension(:) :: shape_function ! shape function used in machine learned diffusivity [nondim]
   !/ Coefficients used in Machine learned diffusivity, Equations 6,7,10,11 in Sane et al. 2024
   real :: c1, c2, c3, c4, c5, c6, c7, c8, c9  ! Non-dimensional constants
@@ -1668,7 +1669,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   p2 = min(p2,  8.0) ! capping p2 to 8.0 if > 8.0
   ! Empirical model to predict sm:
   ! F1 is solely function of p2
-  F = exp( (-p2-CS%c6)/ CS%c7 ) ! F = (CS%c4 / (CS%c5 + exp( (-p2-CS%c6)/ CS%c7 )) ) + CS%c8
+  F = exp( (-p2-CS%c6)/ CS%c7 ) ! originally, F=(CS%c4/(CS%c5+exp((-p2-CS%c6)/CS%c7)))+CS%c8
   F = CS%c5 + F
   F = CS%c4 / F
   F = F + CS%c8
@@ -1677,7 +1678,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   F_I = 1.0 / ( Fp1 )
   sm = CS%c2 + (CS%c3 * F_I)
   sm = CS%c1 / sm 
-  sm = min(sm,0.7) ! makes sure sm is less than 0.7, data ranges from 0.2 to 0.60
+  sm = min(sm,0.7) ! makes sure sm is less than 0.7, true sm range is from 0.2 to 0.60
   sm = max(sm,0.1) ! makes sure sm is more than 0.1
   sm= sm * hbl ! peak of shape function in model vertical coordinate z, or peak of shape function in z coordinate
   sm_I = 1.0/sm ! inverse of sm x hbl
@@ -1725,10 +1726,10 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
       !   Where $a = -1$ for $B \leq 0$ and $a = 1$ for $B > 0$ to distinguish between 
       !  surface heating and cooling conditions. " 
 
-      if (B_flux .le. -7.0E-07) then
-              bflux_c = -7.0E-07
-      elseif (B_flux .ge. 7.0E-07) then
-              bflux_c = 7.0E-07
+      if (B_flux .le. CS%bflux_lower_cap) then
+              bflux_c = CS%bflux_lower_cap
+      elseif (B_flux .ge. CS%bflux_upper_cap) then
+              bflux_c = CS%bflux_upper_cap
       else
               bflux_c = B_flux
       endif
@@ -1738,7 +1739,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
 
       if (absf .le. CS%f_lower) then   ! 
               absf_c = CS%f_lower    ! 0.1 deg Latitude, cap avoids zero coriolis, 
-                                     ! does not affect the solution
+                                     ! solution is not sensitive below 0.1 Degrees
       else
               absf_c = absf
       endif
@@ -1763,8 +1764,8 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
       ! \frac{(c_{13} e^{(-p_2/c_{14})} + c_{15}) }{p_1 ^2} }
              ! p1 is merged in p3
 
-              p2 = absf_c/(7.2921E-05)
-              p3 = (CS%c12/ust_c)*sqrt(abs(bflux_c)/(7.2921e-05)) ! 7.2921e-05/s is Omega, Earth rotation
+              p2 = absf_c/(CS%omega)
+              p3 = (CS%c12/ust_c)*sqrt(abs(bflux_c)/(CS%omega)) ! 7.2921e-05/s is CS%Omega, Earth rotation
 
               p4 = CS%c13 * exp(-p2/ CS%c14) + CS%c15
               p4 =  1 + (absf_c * p4 * ust_c * ust_c)/abs(bflux_c) 
@@ -1779,7 +1780,8 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
       ! v0_lower_cap has been set to 0.0001 as data below that values does not exist in the training
       ! solution was tested for lower cap of 0.00001 and was found to be insensitive. 
       ! sensitivity arises when lower cap is 0.0. That is when diffusivity attains extremely low values and 
-      ! they go near molecular diffusivity. Boundary layers might become "sub-grid" some cause issues such as anomlous surface warming. 
+      ! they go near molecular diffusivity. Boundary layers might become "sub-grid" i.e. < 1 metre 
+      ! some cause issues such as anomlous surface warming. 
       ! this needs further investigation, our choices are motivated by practicallity for now.
 
       v0_dummy=min(v0_dummy,0.1) ! kept for safety, but has never hit this cap. 
@@ -2669,11 +2671,19 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
   ! Default value of 2.5384E-07 corresponds to 0.1 deg. 
   call get_param(param_file, mdl, "f_lower", CS%f_lower, &
                        "value of lower limit cap for v0, default is for 0.1 deg, insensitive , & 
-                       below 1deg", units="1/s", default=2.5384E-07 )
+                       below 1deg", units="s-1", default=2.5384E-07, scale=US%T_to_S) 
   
   call get_param(param_file, mdl, "v0_lower_cap", CS%v0_lower_cap, &
                        "value of lower limit cap for Coriolis in v0", & 
-                       units="1/s", default=0.0001)
+                       units="m s-1", default=0.0001, scale=US%Z_to_m*US%s_to_T)
+
+  call get_param(param_file, mdl, "bflux_lower_cap", CS%bflux_lower_cap, &
+                       "value of lower limit cap for Bflux used in setting in v0", & 
+                       units="m2 s-3", default=-7.0E-07, scale=US%Z2_T3_to_m2_s3)
+  
+  call get_param(param_file, mdl, "bflux_upper_cap", CS%bflux_upper_cap, &
+                       "value of upper limit cap for Bflux used in setting in v0", & 
+                       units="m2 s-3", default=7.0E-07, scale=US%Z2_T3_to_m2_s3)
 
   ! The coefficients used for machine learned diffusivity
   ! c1 to c8 used for sigma_m, 
