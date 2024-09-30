@@ -2675,15 +2675,15 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
   
   call get_param(param_file, mdl, "v0_lower_cap", CS%v0_lower_cap, &
                        "value of lower limit cap for Coriolis in v0", & 
-                       units="m s-1", default=0.0001, scale=US%Z_to_m*US%s_to_T)
+                       units="m s-1", default=0.0001, scale=US%m_to_Z*US%T_to_s)
 
   call get_param(param_file, mdl, "bflux_lower_cap", CS%bflux_lower_cap, &
                        "value of lower limit cap for Bflux used in setting in v0", & 
-                       units="m2 s-3", default=-7.0E-07, scale=US%Z2_T3_to_m2_s3)
+                       units="m2 s-3", default=-7.0E-07, scale=(US%m_to_L**2)*(US%T_to_s**3))
   
   call get_param(param_file, mdl, "bflux_upper_cap", CS%bflux_upper_cap, &
                        "value of upper limit cap for Bflux used in setting in v0", & 
-                       units="m2 s-3", default=7.0E-07, scale=US%Z2_T3_to_m2_s3)
+                       units="m2 s-3", default=7.0E-07, scale=(US%m_to_L**2)*(US%T_to_s**3))
 
   ! The coefficients used for machine learned diffusivity
   ! c1 to c8 used for sigma_m, 
