@@ -1624,6 +1624,7 @@ subroutine getshapefunction(CS,GV,h,absf,B_flux,u_star,MLD_guess,MixLen_shape)
 end subroutine getshapefunction
 
 subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
+! gives shape function from Sane et al. 2024.
   type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
   real, dimension(SZK_(GV)+1), intent(inout) :: shape_func  ! shape function
@@ -1636,27 +1637,27 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   real, intent(in) :: MLD_guess !Mixing Layer depth guessed/found for iteration [Z ~> m].
 
   ! local variables for this subroutine
-  real, dimension(SZK_(GV)+1) :: hz ! depth variable, only used in this routine
-  integer :: nz ! nz = GV%ke
+  real, dimension(SZK_(GV)+1) :: hz ! depth variable, only used in this routine [H ~> m]
+  integer :: nz
   integer :: K ! integer for looping
   integer :: i,j,n ! integer for looping, local only
-  real :: p1 ! ((B_flux * h))/(u_star^3), boundary layer depth by M-O depth, nondim
-  real :: p2 ! ((h f)/u_star ),  boundary layer depth by Ekman depth, nondim
-  real :: sm ! sigma_max: location of maximum of shape function in sigma coordinate, nondim
-  real :: sm_I ! inverse of sm, nondim
-  real :: sm_I2 ! 1.0/(1.0 - sm), nondim
+  real :: p1 ! ((B_flux * h))/(u_star^3), boundary layer depth by M-O depth, [nondim]
+  real :: p2 ! ((h f)/u_star ),  boundary layer depth by Ekman depth, [nondim]
+  real :: sm ! sigma_max: location of maximum of shape function in sigma coordinate [nondim]
+  real :: sm_I ! inverse of sm,[nondim]
+  real :: sm_I2 ! 1.0/(1.0 - sm), [nondim]
   real :: hbl ! Boundary layer depth, same as MLD_guess [Z ~> m]
-  real :: F ! function, used in asymptotic model for sm, Equation 7 in Sane et al. 2024, nondim 
-  real :: F_I ! Inverse of F, nondim
-  real :: Fp1 ! = F*p1, nondim
+  real :: F ! function, used in asymptotic model for sm, Equation 7 in Sane et al. 2024 [nondim]
+  real :: F_I ! Inverse of F, [nondim]
+  real :: Fp1 ! = F*p1, [nondim]
 
   nz = SZK_(GV)+1
   hz(1)=0.0
-  do n=2,nz
-      hz(n)=hz(n-1) + h(n-1)*GV%H_to_Z
+  do K=2,nz
+    hz(K)=hz(K-1) + h(K-1)*GV%H_to_Z
   end do
   hbl = MLD_Guess ! hbl is boundary layer depth. 
-  shape_func=0.0  ! initializing the entire shape_function array
+  shape_func(:)=0.0  ! initializing the entire shape_function array
 
   p1 = (hbl * absf)/(u_star)   ! Boundary layer depth divided by Ekman depth
   p2 = ((-B_flux * hbl))/(u_star**3) ! Boundary layer depth divided by Monin-Obukhov depth
@@ -1705,21 +1706,19 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
 
   end subroutine kappa_eqdisc
 
-
   subroutine get_eqdisc_v0(CS,absf,B_flux,u_star,MLD_guess,v0_dummy)
-      ! this subroutine gives velocity scale from neural network
+      ! gives velocity scale using equations that approximate neural network of Sane et al. 2023
       type(energetic_PBL_CS),  intent(inout) :: CS     !< Energetic PBL control struct
-      real, intent(in) :: B_flux ! surface buoyancy flux
-      real, intent(in) :: u_star ! surface friction velocity
-      real, intent(in) :: MLD_guess ! boundary layer depth
-      real, intent(in) :: absf  ! coriolis
-      ! for capping
-      real :: bflux_c, ust_c , absf_c ! capped bflux, ustar, absf
-      ! end capping
-      real, intent(inout) :: v0_dummy   ! only velocity is the output. need to rename this later
-      real :: p1, p2, p3, p4  ! non-dimensional parameter (1/u)*(sqrt(Bflux/f)), p2 = f/Omega, omega is Earth's rotation
-      ! p3 and p4 are not non-dimensional. They are used to simplify the code
+      real, intent(in) :: B_flux ! The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
+      real, intent(in) :: u_star ! The surface friction velocity [Z T-1 ~> m s-1]
+      real, intent(in) :: MLD_guess ! boundary layer depth guessed/found for iteration [Z ~> m]
 
+      real, intent(in) :: absf  ! Coriolis [T-1 ~> s-1]
+      real :: bflux_c  ! capped bflux [Z2 T-3 ~> m2 s-3]
+      real :: ust_c    ! capped ustar [Z T-1 ~> m s-1]
+      real :: absf_c   ! capped absf [T-1 ~> s-1]
+      real, intent(inout) :: v0_dummy   ! velocity scale v0, local variable [Z T-1 ~> m s-1]
+      real :: p1, p2, p3, p4  ! [nondim]
       ! from Sane et al. 2024: 
       ! " p_1 &= \frac{a}{u_*} \sqrt{\frac{|B|}{f}}, \\ %= \sqrt{ \frac{L_{Ek}}{L_{MO}}}  \\
       !   p_2 &= \frac{f}{\Omega},
@@ -1727,65 +1726,55 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
       !  surface heating and cooling conditions. " 
 
       if (B_flux .le. CS%bflux_lower_cap) then
-              bflux_c = CS%bflux_lower_cap
+        bflux_c = CS%bflux_lower_cap
       elseif (B_flux .ge. CS%bflux_upper_cap) then
-              bflux_c = CS%bflux_upper_cap
+        bflux_c = CS%bflux_upper_cap
       else
-              bflux_c = B_flux
+        bflux_c = B_flux
       endif
       
       ust_c = u_star
 
-
       if (absf .le. CS%f_lower) then   ! 
-              absf_c = CS%f_lower    ! 0.1 deg Latitude, cap avoids zero coriolis, 
-                                     ! solution is not sensitive below 0.1 Degrees
+        absf_c = CS%f_lower    ! 0.1 deg Latitude, cap avoids zero coriolis, 
+                               ! solution is not sensitive below 0.1 Degrees
       else
-              absf_c = absf
+        absf_c = absf
       endif
-
 
       ! setting v0_dummy here:
 
       if (bflux_c .ge. 0.0) then ! surface heating and neutral conditions
-
       ! Equation 10 in Sane et al. 2024:
       ! \frac{v}{u_*} = \frac{-c_9}{p_1 + c_{10} + \frac{c_{11}^2}{p_1 - c_{11}} }
-      
-              p1 =  -(1.0/ust_c) * sqrt(abs(bflux_c)/absf_c) 
-              p3 = (CS%c11**2.0) / (p1-CS%c11)
-              p4 = (p1+CS%c10) + p3
-              v0_dummy = -CS%c9/p4
+        p1 =  -(1.0/ust_c) * sqrt(abs(bflux_c)/absf_c) 
+        p3 = (CS%c11**2.0) / (p1-CS%c11)
+        p4 = (p1+CS%c10) + p3
+        v0_dummy = -CS%c9/p4
         
       else               ! surface cooling
       ! Equation 11 in Sane et al. 2024:
       ! 
       !     \frac{v}{u_*}=\frac{c_{12} p_1 \cdot \sqrt{p_2} }{1 +  ...
       ! \frac{(c_{13} e^{(-p_2/c_{14})} + c_{15}) }{p_1 ^2} }
-             ! p1 is merged in p3
-
-              p2 = absf_c/(CS%omega)
-              p3 = (CS%c12/ust_c)*sqrt(abs(bflux_c)/(CS%omega)) ! 7.2921e-05/s is CS%Omega, Earth rotation
-
-              p4 = CS%c13 * exp(-p2/ CS%c14) + CS%c15
-              p4 =  1 + (absf_c * p4 * ust_c * ust_c)/abs(bflux_c) 
- 
-              v0_dummy  = (p3 / p4 ) + CS%c16 
-              
+      ! p1 is merged in p3
+        p2 = absf_c/(CS%omega)
+        p3 = (CS%c12/ust_c)*sqrt(abs(bflux_c)/(CS%omega)) ! 7.2921e-05/s is CS%Omega, Earth rotation
+        p4 = CS%c13 * exp(-p2/ CS%c14) + CS%c15
+        p4 =  1 + (absf_c * p4 * ust_c * ust_c)/abs(bflux_c) 
+        v0_dummy  = (p3 / p4 ) + CS%c16 
       endif
       
       v0_dummy = v0_dummy * ust_c ! v0_dummy = v/u*, so it is multiplied by ust_c to get v0
-
       v0_dummy=max(v0_dummy,CS%v0_lower_cap)  ! CS%v0_lower_cap
+      v0_dummy=min(v0_dummy,0.1) ! kept for safety, but has never hit this cap. 
+
       ! v0_lower_cap has been set to 0.0001 as data below that values does not exist in the training
       ! solution was tested for lower cap of 0.00001 and was found to be insensitive. 
       ! sensitivity arises when lower cap is 0.0. That is when diffusivity attains extremely low values and 
       ! they go near molecular diffusivity. Boundary layers might become "sub-grid" i.e. < 1 metre 
       ! some cause issues such as anomlous surface warming. 
       ! this needs further investigation, our choices are motivated by practicallity for now.
-
-      v0_dummy=min(v0_dummy,0.1) ! kept for safety, but has never hit this cap. 
-
 end subroutine get_eqdisc_v0
 
 !> This subroutine calculates the change in potential energy and or derivatives
