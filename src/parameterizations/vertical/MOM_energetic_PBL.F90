@@ -996,7 +996,7 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
 
       call getshapefunction(CS,GV,h,absf,B_flux,u_star,MLD_guess,MixLen_shape) ! used for ML-eqdisc
           v0_dummy = 0.0 ! a variable that gets passed on to subroutine get_eqdisc_v0
-          CS%v0=0.0
+          CS%v0 = 0.0
           if (CS%eqdisc_v0 .eqv. .true.) then
                   call get_eqdisc_v0(CS,absf,B_flux,u_star,MLD_guess,v0_dummy)
                   CS%v0 = v0_dummy
@@ -1576,7 +1576,7 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
 
 end subroutine ePBL_column
 
-subroutine getshapefunction(CS,GV,h,absf,B_flux,u_star,MLD_guess,MixLen_shape)
+subroutine getshapefunction(CS, GV, h, absf, B_flux, u_star, MLD_guess, MixLen_shape)
 ! gives you shape function
   type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
@@ -1584,14 +1584,16 @@ subroutine getshapefunction(CS,GV,h,absf,B_flux,u_star,MLD_guess,MixLen_shape)
 
   real, dimension(SZK_(GV)), intent(in)  :: h      !< Layer thicknesses [H ~> m or kg m-2].
   ! Local variables
-  real, dimension(SZK_(GV)+1) :: MixLen_shape ! A nondimensional shape factor for the mixing length that
-                                              ! gives it an appropriate asymptotic value at the bottom of
-                                              ! the boundary layer [nondim].
-  real, intent(in) :: absf      ! The absolute value of f [T-1 ~> s-1].
-  real, intent(in) :: u_star    ! The surface friction velocity [Z T-1 ~> m s-1].
-  real, intent(in) :: B_Flux    ! The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
-  real, dimension(SZK_(GV)+1) :: hz ! depth variable, only used in this routine
-  real, intent(in) :: MLD_guess !Mixing Layer depth guessed/found for iteration [Z ~> m].
+  real, dimension(SZK_(GV)+1) :: MixLen_shape !< A nondimensional shape factor for the mixing length that
+                                              !! gives it an appropriate asymptotic value at the bottom of
+                                              !! the boundary layer [nondim].
+  real, intent(in) :: absf      !< The absolute value of f [T-1 ~> s-1].
+  real, intent(in) :: u_star    !< The surface friction velocity [Z T-1 ~> m s-1].
+  real, intent(in) :: B_Flux    !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
+  real, dimension(SZK_(GV)+1) :: hz !< depth variable, only used in this routine
+  real, intent(in) :: MLD_guess !< Mixing Layer depth guessed/found for iteration [Z ~> m].
+
+  ! Local variables for this subroutine
   real :: I_MLD     ! The inverse of the current value of MLD [Z-1 ~> m-1].
   real :: h_rsum    ! The running sum of h from the top [Z ~> m].
   integer :: K  ! integer for loopping 
@@ -1638,19 +1640,19 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   real :: p2 ! ((h f)/u_star ),  boundary layer depth by Ekman depth, [nondim]
   real :: sm ! sigma_max: location of maximum of shape function in sigma coordinate [nondim]
   real :: sm_I ! inverse of sm,[nondim]
-  real :: sm_I2 ! 1.0/(1.0 - sm), [nondim]
+  real :: sm_I2 ! An inverse variable given by 1.0/(1.0 - sm), [nondim]
   real :: hbl ! Boundary layer depth, same as MLD_guess [Z ~> m]
   real :: F ! function, used in asymptotic model for sm, Equation 7 in Sane et al. 2024 [nondim]
   real :: F_I ! Inverse of F, [nondim]
   real :: Fp1 ! = F*p1, [nondim]
 
   nz = SZK_(GV)+1
-  hz(1)=0.0
+  hz(1) = 0.0
   do K=2,nz
-    hz(K)=hz(K-1) + h(K-1)*GV%H_to_Z
+    hz(K) = hz(K-1) + h(K-1)*GV%H_to_Z
   end do
-  hbl = MLD_Guess ! hbl is boundary layer depth. 
-  shape_func(:)=0.0  ! initializing the entire shape_function array
+  hbl = MLD_Guess ! hbl is boundary layer depth.
+  shape_func(:) = 0.0  ! initializing the entire shape_function array
 
   p1 = (hbl * absf)/(u_star)   ! Boundary layer depth divided by Ekman depth
   p2 = ((-B_flux * hbl))/(u_star**3) ! Boundary layer depth divided by Monin-Obukhov depth
@@ -1660,7 +1662,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   ! This capping does not matter because these equations have asymptotes. Not sensitive beyond the caps.
   p1 = min(p1, 2.0) ! capping p1 to less than 2.0. It is always >0.0.
   p2 = max(p2, -8.0) ! capping p2 to -8.0 if less than -8.0
-  p2 = min(p2,  8.0) ! capping p2 to 8.0 if > 8.0
+  p2 = min(p2,  8.0) ! capping p2 to 8.0 if greater than 8.0
   ! Empirical model to predict sm:
   ! F1 is solely function of p2
   F = exp( (-p2-CS%c6)/ CS%c7 ) ! originally, F=(CS%c4/(CS%c5+exp((-p2-CS%c6)/CS%c7)))+CS%c8
@@ -1671,28 +1673,27 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
   Fp1 = max(Fp1, 1E-05) ! an arbitrary small value to cap Fp1, result insensitive below that value
   F_I = 1.0 / ( Fp1 )
   sm = CS%c2 + (CS%c3 * F_I)
-  sm = CS%c1 / sm 
+  sm = CS%c1 / sm
   sm = min(sm,0.7) ! makes sure sm is less than 0.7, true sm range is from 0.2 to 0.60
   sm = max(sm,0.1) ! makes sure sm is more than 0.1
   sm= sm * hbl ! peak of shape function in model vertical coordinate z, or peak of shape function in z coordinate
   sm_I = 1.0/sm ! inverse of sm x hbl
   sm_I2 = 1.0/(hbl-sm)  ! inverse of (hbl-sm), as 0.1<sm<0.7, hbl>sm, hence (hbl-sm) always >0.0
   
-  ! gives the shape, quadratic above sm, cubic below sm. 
+  ! gives the shape, quadratic above sm, cubic below sm.
   ! see Equation 8 in Sane et al. 2024
   ! interpolates a quadratic function from z=0 to z=sm*hbl, and then a cubic from z=sm*hbl to z=hbl
-  shape_func(:) = 0.0 
-  do n=2,nz
+  shape_func(:) = 0.0
+  do n = 2,nz
     if  (hz(n) <= sm) then
       shape_func(n) = -(hz(n) * sm_I)**2.0 + 2.0*(hz(n)*sm_I)
-    elseif  ((hz(n) .gt. sm) .and. (hz(n) <= hbl)) then
+    elseif  ((hz(n) > sm) .and. (hz(n) <= hbl)) then
       shape_func(n) =  ( (1.99 * ((hz(n)-sm)*sm_I2)**3.0) - ( 2.98 *((hz(n)-sm)*sm_I2)**2.0 ) ) + 1.0
-      ! the coefficients 1.99 and 2.98 are dependent on the below value of 0.01. 
+      ! the coefficients 1.99 and 2.98 are dependent on the below value of 0.01.
       ! They smoothly make the cubic go towards 0.01 below hbl.
-    elseif ((hz(n) .gt. hbl)) then
-      shape_func(n) = 0.01 ! we set an arbitrary low value of 0.01
-      ! This value should be small such as 0.01, or 0.001. Result is not sensitive.
-      ! result is only sensitive when the value is set to be exactly 0.0
+    elseif ((hz(n) > hbl)) then
+      shape_func(n) = 0.01 ! we set an arbitrary low value to 0.01
+      ! This value should be small such as 0.01, or 0.001, result is not sensitive. It should not be 0.0
 
     endif
   end do
@@ -1752,8 +1753,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
       
     else ! surface cooling
     ! Equation 11 in Sane et al. 2024:
-    ! 
-    !     \frac{v}{u_*}=\frac{c_{12} p_1 \cdot \sqrt{p_2} }{1 +  ...
+    ! \frac{v}{u_*}=\frac{c_{12} p_1 \cdot \sqrt{p_2} }{1 +  ...
     ! \frac{(c_{13} e^{(-p_2/c_{14})} + c_{15}) }{p_1 ^2} }
     ! p1 is merged in p3
       p2 = absf_c/(CS%omega)
@@ -1764,8 +1764,8 @@ subroutine kappa_eqdisc(shape_func, CS, GV, h, absf, B_flux, u_star, MLD_guess)
     endif
     
     v0_dummy = v0_dummy * ust_c ! v0_dummy = v/u*, so it is multiplied by ust_c to get v0
-    v0_dummy=max(v0_dummy,CS%v0_lower_cap)  ! CS%v0_lower_cap
-    v0_dummy=min(v0_dummy,0.1) ! kept for safety, but has never hit this cap. 
+    v0_dummy = max(v0_dummy,CS%v0_lower_cap)  ! CS%v0_lower_cap
+    v0_dummy = min(v0_dummy,0.1) ! kept for safety, but has never hit this cap. 
 
     ! v0_lower_cap has been set to 0.0001 as data below that values does not exist in the training
     ! solution was tested for lower cap of 0.00001 and was found to be insensitive. 
