@@ -44,7 +44,7 @@ type, public :: energetic_PBL_CS ; private
   real    :: omega_frac      !< When setting the decay scale for turbulence, use this fraction of
                              !! the absolute rotation rate blended with the local value of f, as
                              !! sqrt((1-omega_frac)*f^2 + omega_frac*4*omega^2) [nondim].
-  real    :: omega_I           !< Inverse of the Earth's rotation rate [T ~> s].
+  real    :: omega_I         !< Inverse of the Earth's rotation rate, 1 divided by omega [T ~> s].
 
   !/ Convection related terms
   real    :: nstar           !< The fraction of the TKE input to the mixed layer available to drive
@@ -163,17 +163,20 @@ type, public :: energetic_PBL_CS ; private
                              !! the Ekman depth over the Obukhov depth with destabilizing forcing [nondim].
   real :: Max_Enhance_M = 5. !< The maximum allowed LT enhancement to the mixing [nondim].
 
-  !/ Machine learned equation discovery model paramters ! eqdisc
-  logical :: eqdisc, eqdisc_v0, eqdisc_v0h  ! Machine Learned Equation discovery - shape function and velocity-scale
-  real :: v0_lower_cap, v0_upper_cap ! Lower / upper cap to prevent v0 from attaining anomlously [Z T-1 ~> m s-1]
-                                     ! low /high values
-  real :: f_lower ! Lower cap of |f| i.e. absolute of Coriolis parameter [T-1 ~> s-1]
-                  ! Used in v0 subroutines. Default is 0.1deg Lat
-  real :: bflux_lower_cap, bflux_upper_cap ! Lower and upper cap for capping blfux [Z2 T-3 ~> m2 s-3]
-  real, allocatable, dimension(:) :: shape_function ! shape function used in machine learned diffusivity [nondim]
-  !/ Coefficients used in Machine learned diffusivity, Equations 6,7,10,11 in Sane et al. 2024
-  real :: ML_c(18) ! Array of non-dimensional constants used in machine learned (ML) diffusivity [nondim]
-  real :: shape_function_epsilon ! An small value of shape_function below the boundary layer depth [nondim]
+  !/ Machine learned equation discovery model paramters
+  logical :: eqdisc       !< Uses machine learned shape function
+  logical :: eqdisc_v0    !< Uses machine learned velocity scale
+  logical :: eqdisc_v0h   !< Uses machine learned velocity scale that uses boundary layer depth as input
+  real :: v0_lower_cap    !< Lower cap to prevent v0 from attaining anomlously low values [Z T-1 ~> m s-1]
+  real :: v0_upper_cap    !< Upper cap to prevent v0 from attaining anomlously high values [Z T-1 ~> m s-1]
+  real :: f_lower !< Lower cap of |f| i.e. absolute of Coriolis parameter [T-1 ~> s-1]
+                  !! Used only in get_eqdisc_v0 subroutine. Default is 0.1deg Lat
+  real :: bflux_lower_cap !< Lower cap for capping blfux [Z2 T-3 ~> m2 s-3]
+  real :: bflux_upper_cap !< Upper cap for capping blfux [Z2 T-3 ~> m2 s-3]
+  real, allocatable, dimension(:) :: shape_function !< shape function used in machine learned diffusivity [nondim]
+  !/ Coefficients used for Machine learned diffusivity
+  real :: ML_c(18) !< Array of non-dimensional constants used in machine learned (ML) diffusivity [nondim]
+  real :: shape_function_epsilon !< An small value of shape_function below the boundary layer depth [nondim]
 
   !/ Bottom boundary layer mixing related options
   real :: ePBL_BBL_effic     !< The efficiency of bottom boundary layer mixing via ePBL driven by
@@ -2704,8 +2707,10 @@ subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
 
 end subroutine ePBL_BBL_column
 
+!> gives shape function that sets the vertical structure of OSBL diffusivity
+!! as described in Sane et al. 2025
 subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
-! gives shape function from Sane et al. 2025
+
   type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
   real, dimension(SZK_(GV)+1), intent(inout) :: shape_func  !< shape function, [nondim]
@@ -2817,8 +2822,8 @@ subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
   end do
 end subroutine kappa_eqdisc
 
+!> gives velocity scale (v_0) using equations that approximate neural network of Sane et al. 2023
 subroutine get_eqdisc_v0(CS, absf, B_flux, u_star, v0_dummy)
-  ! gives velocity scale using equations that approximate neural network of Sane et al. 2023
   type(energetic_PBL_CS),  intent(inout) :: CS     !< Energetic PBL control struct
   real, intent(in) :: B_flux !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
   real, intent(in) :: u_star !< The surface friction velocity [Z T-1 ~> m s-1]
@@ -2886,8 +2891,9 @@ subroutine get_eqdisc_v0(CS, absf, B_flux, u_star, v0_dummy)
   ! this needs further investigation, our choices are motivated by practicallity for now.
 end subroutine get_eqdisc_v0
 
+!> gives velocity scale (v_0^h) using equations that approximate neural network of Sane et al. 2023
 subroutine get_eqdisc_v0h(CS, B_flux, u_star, MLD_guess, v0_dummy)
-  ! gives velocity scale using equations that approximate neural network of Sane et al. 2023
+
   type(energetic_PBL_CS),  intent(inout) :: CS     !< Energetic PBL control struct
   real, intent(in) :: B_flux !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
   real, intent(in) :: u_star !< The surface friction velocity [Z T-1 ~> m s-1]
