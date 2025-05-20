@@ -44,7 +44,6 @@ type, public :: energetic_PBL_CS ; private
   real    :: omega_frac      !< When setting the decay scale for turbulence, use this fraction of
                              !! the absolute rotation rate blended with the local value of f, as
                              !! sqrt((1-omega_frac)*f^2 + omega_frac*4*omega^2) [nondim].
-  real    :: omega_I         !< Inverse of the Earth's rotation rate, 1 divided by omega [T ~> s].
 
   !/ Convection related terms
   real    :: nstar           !< The fraction of the TKE input to the mixed layer available to drive
@@ -1120,14 +1119,14 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
                     ! during this timestep for each layer [R Z3 T-2 ~> J m-2].
   real, dimension(SZK_(GV)) :: nstar_k   ! The fraction of conv_PErel that can be converted to mixing
                     ! for each layer [nondim].
-  real, dimension(SZK_(GV)) :: dT_expect !< Expected temperature changes [C ~> degC]
-  real, dimension(SZK_(GV)) :: dS_expect !< Expected salinity changes [S ~> ppt]
+  real, dimension(SZK_(GV)) :: dT_expect ! Expected temperature changes [C ~> degC]
+  real, dimension(SZK_(GV)) :: dS_expect ! Expected salinity changes [S ~> ppt]
   integer, dimension(SZK_(GV)) :: num_itts
 
   integer :: k, nz, itt, max_itt
 
   ! variables for ML based diffusivity
-  real :: v0_ML_turb_vel_scale ! < turb vel scale from ML in diffusivity [Z T-1 ~> m s-1]
+  real :: v0_ML_turb_vel_scale ! turbulence vel scale from ML in diffusivity [Z T-1 ~> m s-1]
 
   nz = GV%ke
 
@@ -2833,12 +2832,12 @@ subroutine get_eqdisc_v0(CS, absf, B_flux, u_star, v0_dummy)
   ! local variables for this subroutine
   real :: bflux_c  ! capped bflux [Z2 T-3 ~> m2 s-3]
   real :: absf_c   ! capped absf [T-1 ~> s-1]
-
   real :: root_b_f ! square root of (abs(B_flux) * Coriolis) [Z T-2 ~> m s-2]
   real :: f_u2     ! Coriolis X ustar^2 [Z2 T-3 ~> m2 s-3]
   real :: den      ! denominator, units iof buuyancy flux [Z2 T-3 ~> m2 s-3]
   real :: root_B_by_Omega ! sqrt( B / Omega )   [Z T-1 ~> m s-1]
   real :: f_prime  ! Coriolis divided by Earth's rotation [nondim]
+  real :: omega_I  ! Inverse of the Earth's rotation rate, 1 divided by omega [T ~> s]
 
   if (B_flux <= CS%bflux_lower_cap) then
     bflux_c = CS%bflux_lower_cap
@@ -2873,8 +2872,9 @@ subroutine get_eqdisc_v0(CS, absf, B_flux, u_star, v0_dummy)
   ! \frac{v_0}{u_*}=\frac{c_{10} \cdot \lambda \cdot \sqrt{f'} }{1 +
   ! \frac{(c_{11} e^{(-c_{12} \cdot f')} + c_{13}) }{\lambda ^2} } + c_{14}
 
-    f_prime = absf_c * CS%omega_I  ! Coriolis divided by Earth's rotation
-    root_B_by_Omega = sqrt( -bflux_c * CS%omega_I  )
+    omega_I = 1.0 / CS%omega
+    f_prime = absf_c * omega_I  ! Coriolis divided by Earth's rotation
+    root_B_by_Omega = sqrt( -bflux_c * omega_I  )
     den = ( -bflux_c + CS%ML_c(11) * f_u2 * exp(-f_prime * CS%ML_c(12) ) ) + CS%ML_c(13)*f_u2
     v0_dummy = ( CS%ML_c(10) * (-bflux_c * root_B_by_Omega) / den  ) + ( CS%ML_c(14) * u_star )
 
@@ -2893,7 +2893,6 @@ end subroutine get_eqdisc_v0
 
 !> gives velocity scale (v_0^h) using equations that approximate neural network of Sane et al. 2023
 subroutine get_eqdisc_v0h(CS, B_flux, u_star, MLD_guess, v0_dummy)
-
   type(energetic_PBL_CS),  intent(inout) :: CS     !< Energetic PBL control struct
   real, intent(in) :: B_flux !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
   real, intent(in) :: u_star !< The surface friction velocity [Z T-1 ~> m s-1]
@@ -3710,9 +3709,6 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
   call get_param(param_file, mdl, "OMEGA", CS%omega, &
                  "The rotation rate of the earth.", &
                  units="s-1", default=7.2921e-5, scale=US%T_to_S)
-  call get_param(param_file, mdl, "OMEGA_I", CS%omega_I, &
-                 "The rotation rate of the earth.", &
-                 units="s", default=13713.470742310172, scale=US%T_to_S)
   call get_param(param_file, mdl, "ML_USE_OMEGA", use_omega, &
                  "If true, use the absolute rotation rate instead of the "//&
                  "vertical component of rotation when setting the decay "//&
@@ -4135,42 +4131,42 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
                  units="nondim", default=0.95,  do_not_log=(CS%LT_enhance_form==No_Langmuir))
   endif
 
-  !/Options related to Machine Learning Equation Discovery ! eqdisc
+  !/Options related to Machine Learning Equation Discovery
   ! flag for using shape function from equation discovery - machine learning
+  ! EPBL_EQD_DIFFUSIVITY : EPBL + Equation Discovery Diffusivity parameters
 
-   call get_param(param_file, mdl, "Equation_Discovery_shape", CS%eqdisc, &
-                 "flag for activating equation for shape function "// &
-                 "that uses forcing to change its structure.", &
-                 units="nondim", default=.false.)
+   call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SHAPE", CS%eqdisc, &
+                 "Logical flag for activating equation for shape function "// &
+                 "that uses forcing to change its structure.", default=.false.)
 
-   call get_param(param_file, mdl, "Equation_Discovery_velocity", CS%eqdisc_v0, &
-                   "flag for activating Machine Learned equation discovery for velocity scale", &
-                   units="nondim", default=.false.)
+   call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY", CS%eqdisc_v0, &
+                  "Logical flag for activating Machine Learned equation discovery "// &
+                  for velocity scale.", default=.false.)
 
-   call get_param(param_file, mdl, "Equation_Discovery_velocity_h", CS%eqdisc_v0h, &
-                   "flag for activating Machine Learned equation discovery for velocity scale with h as input", &
-                   units="nondim", default=.false.)
+   call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY_H", CS%eqdisc_v0h, &
+                   "Logical flag for activating Machine Learned equation discovery "// &
+                   for velocity scale with h as input", default=.false.)
 
   ! sets a  lower cap for abs_f (Coriolis parameter) required in equation for v_0.
   ! Small value, solution not sensitive below 1 deg Latitute
   ! Default value of 2.5384E-07 corresponds to 0.1 deg.
-  call get_param(param_file, mdl, "f_lower", CS%f_lower, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_CORIOLIS_LOWER_CAP", CS%f_lower, &
                        "value of lower limit cap for v0, default is for 0.1 deg, insensitive , &
                        below 1deg", units="s-1", default=2.5384E-07, scale=US%T_to_S)
 
-  call get_param(param_file, mdl, "v0_lower_cap", CS%v0_lower_cap, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_V0_LOWER_CAP", CS%v0_lower_cap, &
                        "value of lower limit cap for Coriolis in v0", &
                        units="m s-1", default=0.0001, scale=US%m_to_Z*US%T_to_s)
 
-  call get_param(param_file, mdl, "v0_upper_cap", CS%v0_upper_cap, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_V0_UPPER_CAP", CS%v0_upper_cap, &
                        "value of upper limit cap for Coriolis in v0", &
                        units="m s-1", default=0.1, scale=US%m_to_Z*US%T_to_s)
 
-  call get_param(param_file, mdl, "bflux_lower_cap", CS%bflux_lower_cap, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_BFLUX_LOWER_CAP", CS%bflux_lower_cap, &
                        "value of lower limit cap for Bflux used in setting in v0", &
                        units="m2 s-3", default=-7.0E-07, scale=(US%m_to_L**2)*(US%T_to_s**3))
 
-  call get_param(param_file, mdl, "bflux_upper_cap", CS%bflux_upper_cap, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_BFLUX_UPPER_CAP", CS%bflux_upper_cap, &
                        "value of upper limit cap for Bflux used in setting in v0", &
                        units="m2 s-3", default=7.0E-07, scale=(US%m_to_L**2)*(US%T_to_s**3))
 
@@ -4179,12 +4175,12 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
   ! c1 to c6 used for sigma_m,
   !  7 to 9 v_0 surface heating, 10 to 14 v_0 surface cooling (ML velocity scale without h as input)
   ! 14, 15, & 16 for v_0h surface heating, 17, 18, & 14 for v_0h surface cooling (ML velocity scale with h as input)
-  call get_param(param_file, mdl, "ML_diffusivity_coeffs", CS%ML_c, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_COEFFS", CS%ML_c, &
                  "Coefficient used for ML diffusivity 1 to 18 ", units="nondim", &
                   defaults=(/1.7908 , 0.6904, 0.0712, 0.4380, 2.6821, 1.5845, 0.1550,  1.1120,  0.8616, 0.0984, &
                              45.0,    2.8570, 3.290,  0.0785, 0.650,  0.0944, 6.0277, 15.7292 /))
 
-  call get_param(param_file, mdl, "Shape_Function_Epsilon", CS%shape_function_epsilon, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SHAPE_FUNCTION_EPSILON", CS%shape_function_epsilon, &
                  "Constant value of OSBL shape function below the boundary layer", units="nondim", default=0.01 )
 
   !/ options end for Machine Learning Equation Discovery
