@@ -4139,63 +4139,54 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
                  "Logical flag for activating ML equation for shape function "// &
                  "that uses forcing to change its structure.", &
                  units="nondim", default=.false.)
-  
-  if (CS%eqdisc) then
-    
-    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY", CS%eqdisc_v0, &
+
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY", CS%eqdisc_v0, &
                    "Logical flag for activating ML equation discovery for velocity scale", &
                    units="nondim", default=.false.)
 
-    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY_H", CS%eqdisc_v0h, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY_H", CS%eqdisc_v0h, &
                    "Logical flag for activating ML equation discovery for velocity scale with h as input", &
                    units="nondim", default=.false.)
 
-    if (CS%eqdisc_v0 .eq. CS%eqdisc_v0h) then
-      call MOM_error(ERROR, &
-        & "When EPBL_EQD_DIFFUSIVITY_SHAPE is enabled, exactly one of " &
-        & "EPBL_EQD_DIFFUSIVITY_VELOCITY or EPBL_EQD_DIFFUSIVITY_VELOCITY_H " &
-        & "must be set to .true.")
-    endif
 
-    ! sets a  lower cap for abs_f (Coriolis parameter) required in equation for v_0.
-    ! Small value, solution not sensitive below 1 deg Latitute
-    ! Default value of 2.5384E-07 corresponds to 0.1 deg.
-    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_CORIOLIS_LOWER_CAP", CS%f_lower, &
+  ! sets a  lower cap for abs_f (Coriolis parameter) required in equation for v_0.
+  ! Small value, solution not sensitive below 1 deg Latitute
+  ! Default value of 2.5384E-07 corresponds to 0.1 deg.
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_CORIOLIS_LOWER_CAP", CS%f_lower, &
                        "value of lower limit cap for v0, default is for 0.1 deg, insensitive , &
                        below 1deg", units="s-1", default=2.5384E-07, scale=US%T_to_S)
 
-    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_V0_LOWER_CAP", CS%v0_lower_cap, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_V0_LOWER_CAP", CS%v0_lower_cap, &
                        "value of lower limit cap for Coriolis in v0", &
                        units="m s-1", default=0.0001, scale=US%m_to_Z*US%T_to_s)
 
-    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_V0_UPPER_CAP", CS%v0_upper_cap, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_V0_UPPER_CAP", CS%v0_upper_cap, &
                        "value of upper limit cap for Coriolis in v0", &
                        units="m s-1", default=0.1, scale=US%m_to_Z*US%T_to_s)
 
-    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_BFLUX_LOWER_CAP", CS%bflux_lower_cap, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_BFLUX_LOWER_CAP", CS%bflux_lower_cap, &
                        "value of lower limit cap for Bflux used in setting in v0", &
                        units="m2 s-3", default=-7.0E-07, scale=(US%m_to_L**2)*(US%T_to_s**3))
 
-    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_BFLUX_UPPER_CAP", CS%bflux_upper_cap, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_BFLUX_UPPER_CAP", CS%bflux_upper_cap, &
                        "value of upper limit cap for Bflux used in setting in v0", &
                        units="m2 s-3", default=7.0E-07, scale=(US%m_to_L**2)*(US%T_to_s**3))
 
 
-    ! The coefficients used for machine learned diffusivity
-    ! c1 to c6 used for sigma_m,
-    !  7 to 9 v_0 surface heating, 10 to 14 v_0 surface cooling (ML velocity scale without h as input)
-    ! 14, 15, & 16 for v_0h surface heating, 17, 18, & 14 for v_0h surface cooling (ML velocity scale with h as input)
-    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_COEFFS", CS%ML_c, &
+  ! The coefficients used for machine learned diffusivity
+  ! c1 to c6 used for sigma_m,
+  !  7 to 9 v_0 surface heating, 10 to 14 v_0 surface cooling (ML velocity scale without h as input)
+  ! 14, 15, & 16 for v_0h surface heating, 17, 18, & 14 for v_0h surface cooling (ML velocity scale with h as input)
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_COEFFS", CS%ML_c, &
                  "Coefficient used for ML diffusivity 1 to 18 ", units="nondim", &
                   defaults=(/1.7908 , 0.6904, 0.0712, 0.4380, 2.6821, 1.5845, 0.1550,  1.1120,  0.8616, 0.0984, &
                              45.0,    2.8570, 3.290,  0.0785, 0.650,  0.0944, 6.0277, 15.7292 /))
 
-    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SHAPE_FUNCTION_EPSILON", CS%shape_function_epsilon, &
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SHAPE_FUNCTION_EPSILON", CS%shape_function_epsilon, &
                  "Constant value of OSBL shape function below the boundary layer", units="nondim", default=0.01 )
 
-  endif
   !/ options end for Machine Learning Equation Discovery
-  
+
   !/ Options for documenting differences from parameter choices
   call get_param(param_file, mdl, "EPBL_OPTIONS_DIFF", CS%options_diff, &
                  "If positive, this is a coded integer indicating a pair of settings whose "//&
