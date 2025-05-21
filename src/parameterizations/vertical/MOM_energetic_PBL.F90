@@ -2714,7 +2714,7 @@ end subroutine ePBL_BBL_column
 !! as described in Sane et al. 2025
 subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
 
-  type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
+  type(verticalGrid_type), intent(in) :: GV     !< The ocean's vertical grid structure.
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
   real, dimension(SZK_(GV)+1), intent(inout) :: shape_func  !< shape function, [nondim]
   real, intent(in) :: absf      !< The absolute value of f [T-1 ~> s-1]
