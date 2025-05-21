@@ -2731,7 +2731,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
   real :: Eh ! ((h f)/u_star ),  boundary layer depth by Ekman depth, [nondim]
   real :: sm ! sigma_max: location of maximum of shape function in sigma coordinate [nondim]
   real :: hbl ! Boundary layer depth, same as MLD_guess [Z ~> m]
-  real :: F ! function, used in asymptotic model for sm, Equation 7 in Sane et al. 2024 [nondim]
+  real :: F ! function, used in asymptotic model for sm, Equation 7 in Sane et al. 2025 [nondim]
   real :: F_Eh ! F multiplied by Eh [nondim]
   real :: u_star_I  ! inverse of u_star [Z-1 T ~> m-1 s]
 
@@ -2797,7 +2797,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
   coef_c2 = ( 3.0 * ( CS%shape_function_epsilon - 1.0 ) ) * h_minus_smh_I2
 
   ! gives the shape, quadratic above sm, cubic below sm in sigma coordinate
-  ! see Equation 3 in Sane et al. 2024
+  ! see Equation 3 in Sane et al. 2025
   ! interpolates a quadratic function from z=0 to z=sm_h, and then a cubic from z=sm_h to z=hbl
 
   shape_func(1) = 0.0  ! initializing the first element of shape function array
@@ -4143,7 +4143,8 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
 
   call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SHAPE", CS%eqdisc, &
                  "Logical flag for activating ML equation for shape function "// &
-                 "that uses forcing to change its structure.", default=.false.)
+                 "that uses forcing to change its structure. "// &
+                 "Equations are described in Sane et al. (2025).", default=.false.)
 
   if (CS%eqdisc) then
 
