@@ -4139,9 +4139,9 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
                  "Logical flag for activating ML equation for shape function "// &
                  "that uses forcing to change its structure.", &
                  units="nondim", default=.false.)
-  
+
   if (CS%eqdisc) then
-    
+
     call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY", CS%eqdisc_v0, &
                    "Logical flag for activating ML equation discovery for velocity scale", &
                    units="nondim", default=.false.)
@@ -4149,12 +4149,13 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
     call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY_H", CS%eqdisc_v0h, &
                    "Logical flag for activating ML equation discovery for velocity scale with h as input", &
                    units="nondim", default=.false.)
-
-    if (CS%eqdisc_v0 .eq. CS%eqdisc_v0h) then
-      call MOM_error(ERROR, &
-        & "When EPBL_EQD_DIFFUSIVITY_SHAPE is enabled, exactly one of " &
-        & "EPBL_EQD_DIFFUSIVITY_VELOCITY or EPBL_EQD_DIFFUSIVITY_VELOCITY_H " &
-        & "must be set to .true.")
+    
+    ! Ensure exactly one velocity‐scale option is chosen when shape‐function ML is on
+    if (CS%eqdisc_v0 .eqv. CS%eqdisc_v0h) then
+      call MOM_error( ERROR, &
+        "When EPBL_EQD_DIFFUSIVITY_SHAPE is enabled, exactly one of " // &
+        "EPBL_EQD_DIFFUSIVITY_VELOCITY or EPBL_EQD_DIFFUSIVITY_VELOCITY_H " // &
+        "must be set to .true." )
     endif
 
     ! sets a  lower cap for abs_f (Coriolis parameter) required in equation for v_0.
@@ -4195,7 +4196,7 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
 
   endif
   !/ options end for Machine Learning Equation Discovery
-  
+
   !/ Options for documenting differences from parameter choices
   call get_param(param_file, mdl, "EPBL_OPTIONS_DIFF", CS%options_diff, &
                  "If positive, this is a coded integer indicating a pair of settings whose "//&
