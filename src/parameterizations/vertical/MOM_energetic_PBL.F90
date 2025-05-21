@@ -4197,7 +4197,7 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
 
     call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SHAPE_FUNCTION_EPSILON", CS%shape_function_epsilon, &
                  "Constant value of OSBL shape function below the boundary layer", units="nondim", default=0.01 )
-  
+
   else
     CS%eqdisc_v0  = .false. ! setting this to false if CS%eqdisc = .false.
     CS%eqdisc_v0h = .false. ! setting this to false if CS%eqdisc = .false.
