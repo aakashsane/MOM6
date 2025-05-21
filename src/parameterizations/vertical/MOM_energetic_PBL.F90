@@ -908,7 +908,7 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
                                                    !! [Z T-1 ~> m s-1].
   real, dimension(SZK_(GV)+1), &
                            intent(out)   :: mixlen !< The mixing length scale used in Kd [Z ~> m].
-  type(energetic_PBL_CS),  intent(inout)    :: CS     !< Energetic PBL control structure
+  type(energetic_PBL_CS),  intent(in)    :: CS     !< Energetic PBL control structure
   type(ePBL_column_diags), intent(inout) :: eCD    !< A container for passing around diagnostics.
   type(wave_parameters_CS), pointer      :: Waves  !< Waves control structure for Langmuir turbulence
   type(ocean_grid_type),   intent(in)    :: G      !< The ocean's grid structure.
@@ -2710,7 +2710,7 @@ subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
 
 end subroutine ePBL_BBL_column
 
-!> gives shape function that sets the vertical structure of OSBL diffusivity
+!> Gives shape function that sets the vertical structure of OSBL diffusivity
 !! as described in Sane et al. 2025
 subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
 
@@ -2826,9 +2826,9 @@ subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
   end do
 end subroutine kappa_eqdisc
 
-!> gives velocity scale (v_0) using equations that approximate neural network of Sane et al. 2023
+!> Gives velocity scale (v_0) using equations that approximate neural network of Sane et al. 2023
 subroutine get_eqdisc_v0(CS, absf, B_flux, u_star, v0_dummy)
-  type(energetic_PBL_CS),  intent(inout) :: CS     !< Energetic PBL control struct
+  type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
   real, intent(in) :: B_flux !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
   real, intent(in) :: u_star !< The surface friction velocity [Z T-1 ~> m s-1]
   real, intent(in) :: absf  !< The absolute value of f [T-1 ~> s-1].
@@ -2896,9 +2896,10 @@ subroutine get_eqdisc_v0(CS, absf, B_flux, u_star, v0_dummy)
   ! this needs further investigation, our choices are motivated by practicallity for now.
 end subroutine get_eqdisc_v0
 
-!> gives velocity scale (v_0^h) using equations that approximate neural network of Sane et al. 2023
+!> Gives velocity scale (v_0^h) using equations that with using boundary layer depth as one of its inputs
+!! These equations are different than those set in get_eqdisc_v0 subroutine
 subroutine get_eqdisc_v0h(CS, B_flux, u_star, MLD_guess, v0_dummy)
-  type(energetic_PBL_CS),  intent(inout) :: CS     !< Energetic PBL control struct
+  type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
   real, intent(in) :: B_flux !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
   real, intent(in) :: u_star !< The surface friction velocity [Z T-1 ~> m s-1]
   real, intent(in) :: MLD_guess !< boundary layer depth guessed/found for iteration [Z ~> m]
