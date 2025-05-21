@@ -4132,20 +4132,22 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
   endif
 
   !/Options related to Machine Learning Equation Discovery
-  ! flag for using shape function from equation discovery - machine learning
+  ! Logial flags for using shape function from equation discovery - machine learning
   ! EPBL_EQD_DIFFUSIVITY : EPBL + Equation Discovery Diffusivity parameters
 
-   call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SHAPE", CS%eqdisc, &
-                 "Logical flag for activating equation for shape function "// &
-                 "that uses forcing to change its structure.", default=.false.)
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SHAPE", CS%eqdisc, &
+                 "Logical flag for activating ML equation for shape function "// &
+                 "that uses forcing to change its structure.", &
+                 units="nondim", default=.false.)
 
-   call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY", CS%eqdisc_v0, &
-                  "Logical flag for activating Machine Learned equation discovery"//&
-                  "for velocity scale.", default=.false.)
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY", CS%eqdisc_v0, &
+                   "Logical flag for activating ML equation discovery for velocity scale", &
+                   units="nondim", default=.false.)
 
-   call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY_H", CS%eqdisc_v0h, &
-                   "Logical flag for activating Machine Learned equation discovery "//&
-                   "for velocity scale with h as input", default=.false.)
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY_H", CS%eqdisc_v0h, &
+                   "Logical flag for activating ML equation discovery for velocity scale with h as input", &
+                   units="nondim", default=.false.)
+
 
   ! sets a  lower cap for abs_f (Coriolis parameter) required in equation for v_0.
   ! Small value, solution not sensitive below 1 deg Latitute
