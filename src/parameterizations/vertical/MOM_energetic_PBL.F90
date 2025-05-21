@@ -4185,6 +4185,21 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
                        "value of upper limit cap for Bflux used in setting in v0", &
                        units="m2 s-3", default=7.0E-07, scale=(US%m_to_L**2)*(US%T_to_s**3))
 
+    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SIGMA_MAX_LOWER_CAP", CS%sigma_max_lower_cap, &
+                       "value of lower limit cap for sigma coordinate of maximum for diffusivity", &
+                       units="nondim", default=0.1)
+
+    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SIGMA_MAX_LOWER_CAP", CS%sigma_max_upper_cap, &
+                       "value of upper limit cap for sigma coordinate of maximum for diffusivity", &
+                       units="nondim", default=0.7)
+
+    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_EH_UPPER_CAP", CS%Eh_upper_cap, &
+                       "value of upper limit cap for boundary layer depth by Ekman depth hf/u", &
+                       units="nondim", default=2.0)
+
+    call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_LH_CAP", CS%Lh_cap, &
+                       "value of upper limit cap for boundary layer depth by Monin-Obukhov depth hB/u^3", &
+                       units="nondim", default=8.0)
 
     ! The coefficients used for machine learned diffusivity
     ! c1 to c6 used for sigma_m,
