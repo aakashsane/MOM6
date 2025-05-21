@@ -172,6 +172,10 @@ type, public :: energetic_PBL_CS ; private
                   !! Used only in get_eqdisc_v0 subroutine. Default is 0.1deg Lat
   real :: bflux_lower_cap !< Lower cap for capping blfux [Z2 T-3 ~> m2 s-3]
   real :: bflux_upper_cap !< Upper cap for capping blfux [Z2 T-3 ~> m2 s-3]
+  real :: sigma_max_lower_cap    !< Lower cap to prevent sigma_max from attaining low values [nondim]
+  real :: sigma_max_upper_cap    !< Upper cap to prevent sigma_max from attaining high values [nondim]
+  real :: Eh_upper_cap !< Upper cap to prevent Eh = hf/(u__*) from attaining high values [nondim]
+  real :: Lh_cap       !< Cap to prevent Lh = h/Monin_Obukhov_depth from attaining beyond extreme values [nondim]
   real, allocatable, dimension(:) :: shape_function !< shape function used in machine learned diffusivity [nondim]
   !/ Coefficients used for Machine learned diffusivity
   real :: ML_c(18) !< Array of non-dimensional constants used in machine learned (ML) diffusivity [nondim]
@@ -2760,8 +2764,8 @@ subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
   ! B_flux given negative sign to follow convention used in Sane et al. 2023
   ! Lh < 0 --> surface stabilizing i.e. heating, and Lh > 0 --> surface destabilizing i.e. cooling
   ! This capping does not matter because these equations have asymptotes. Not sensitive beyond the caps.
-  Eh = min(Eh, 2.0) ! capping p1 to less than 2.0. It is always >0.0.
-  Lh = min(max(Lh, -8.0), 8.0) ! capping Lh between -8 and 8
+  Eh = min(Eh, CS%Eh_upper_cap) ! capping p1 to less than 2.0. It is always >0.0.
+  Lh = min(max(Lh, -CS%Lh_cap), CS%Lh_cap) ! capping Lh between -8 and 8
 
   ! Empirical model to predict sm:
   ! F is Equation (6) in Sane et al. 2025, and needs to be computed before sigma_m:
@@ -2773,7 +2777,8 @@ subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
   F = (1.0/ ( CS%ML_c(3) + CS%ML_c(4) * exp(-CS%ML_c(5) * Lh) ) ) + CS%ML_c(6)
   F_Eh = F * Eh
   sm = F_Eh / (CS%ML_c(1)*F_Eh +CS%ML_c(2))
-  sm = min(max(sm,0.1),0.7) ! makes sure 0.1<sm<0.7, true sm range is (approx) 0.2 to 0.60
+  sm = min(max(sm, CS%sigma_max_lower_cap), CS%sigma_max_upper_cap) ! makes sure 0.1<sm<0.7
+                                                                    ! true sm range is (approx) 0.2 to 0.60
 
   sm_h = sm * hbl
   sm_h_I = 1.0/sm_h                                 ! 1.0 /  (sm x hbl)
@@ -4172,6 +4177,21 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
                        "value of upper limit cap for Bflux used in setting in v0", &
                        units="m2 s-3", default=7.0E-07, scale=(US%m_to_L**2)*(US%T_to_s**3))
 
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SIGMA_MAX_LOWER_CAP", CS%sigma_max_lower_cap, &
+                       "value of lower limit cap for sigma coordinate of maximum for diffusivity", &
+                       units="nondim", default=0.1)
+
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_SIGMA_MAX_LOWER_CAP", CS%sigma_max_upper_cap, &
+                       "value of upper limit cap for sigma coordinate of maximum for diffusivity", &
+                       units="nondim", default=0.7)
+
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_EH_UPPER_CAP", CS%Eh_upper_cap, &
+                       "value of upper limit cap for boundary layer depth by Ekman depth hf/u", &
+                       units="nondim", default=2.0)
+
+  call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_LH_CAP", CS%Lh_cap, &
+                       "value of upper limit cap for boundary layer depth by Monin-Obukhov depth hB/u^3", &
+                       units="nondim", default=8.0)
 
   ! The coefficients used for machine learned diffusivity
   ! c1 to c6 used for sigma_m,
