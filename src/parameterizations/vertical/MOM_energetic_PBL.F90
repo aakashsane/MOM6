@@ -4149,11 +4149,10 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
     call get_param(param_file, mdl, "EPBL_EQD_DIFFUSIVITY_VELOCITY_H", CS%eqdisc_v0h, &
                    "Logical flag for activating ML equation discovery for velocity scale with h as input", &
                    units="nondim", default=.false.)
-    
+
     ! Ensure exactly one velocity‐scale option is chosen when shape‐function ML is on
     if (CS%eqdisc_v0 .eqv. CS%eqdisc_v0h) then
-      call MOM_error( ERROR, &
-        "When EPBL_EQD_DIFFUSIVITY_SHAPE is enabled, exactly one of " // &
+      call MOM_error(FATAL, "When EPBL_EQD_DIFFUSIVITY_SHAPE is enabled, exactly one of " // &
         "EPBL_EQD_DIFFUSIVITY_VELOCITY or EPBL_EQD_DIFFUSIVITY_VELOCITY_H " // &
         "must be set to .true." )
     endif
