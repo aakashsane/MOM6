@@ -2862,7 +2862,7 @@ subroutine get_eqdisc_v0(CS, absf, B_flux, u_star, v0_dummy)
   ! Equation 7 in Sane et al. 2025:
   ! \frac{v_0}{u_*} = \frac{c_{7}}{\lambda + c_{8} + \frac{c_{9}^2}{\lambda + c_{9}} }
 
-    root_b_f = sqrt(bflux_c * absf_c)
+    root_b_f = sqrt( bflux_c  * absf_c)
     den = bflux_c + (CS%ML_c(8) + CS%ML_c(9)) * u_star * root_b_f  + &
           (CS%ML_c(8) * CS%ML_c(9) + CS%ML_c(9)**2) * f_u2
     v0_dummy = ( ( CS%ML_c(7)*( (u_star * root_b_f) + (CS%ML_c(9)*f_u2) ) ) * u_star) / den
