@@ -284,7 +284,6 @@ subroutine dye_flux_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
                                               !! [conc H T-1 ~> conc m s-1]
   real, dimension(SZI_(G),SZJ_(G)) :: surface_flux_diag ! Surface tracer flux for diagnostics [conc Z T-1 ~> conc m s-1]
   real    :: Idt      ! Inverse of timestep [T-1 ~> s-1]
-  real    :: h_total  ! Total thickness for flux application [H ~> m or kg m-2]
   integer :: i, j, k, is, ie, js, je, nz, m
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -294,13 +293,24 @@ subroutine dye_flux_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
 
   Idt = 1.0 / dt
 
-  ! Apply surface fluxes and vertical diffusion for each tracer
+  ! Apply vertical diffusion first, then surface fluxes
   do m = 1, CS%ntr
+    ! Apply vertical diffusion first
+    if (present(evap_CFL_limit) .and. present(minimum_forcing_depth)) then
+      do k = 1, nz ; do j = js, je ; do i = is, ie
+        h_work(i,j,k) = h_old(i,j,k)
+      enddo ; enddo ; enddo
+      call applyTracerBoundaryFluxesInOut(G, GV, CS%tr(:,:,:,m), dt, fluxes, h_work, &
+                                          evap_CFL_limit, minimum_forcing_depth)
+      call tracer_vertdiff(h_work, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+    else
+      call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+    endif
+
+    ! Now apply surface flux AFTER vertical diffusion (like ideal_age does)
     ! Initialize surface flux diagnostic field
     surface_flux_diag(:,:) = 0.0
     
-    ! Set up surface flux diagnostic and apply flux directly to top layer
-    ! We apply the flux by incrementing the tracer in the surface layer
     do j = js, je ; do i = is, ie
       if (CS%flux_source_minlon(m) < G%geoLonT(i,j) .and. &
           CS%flux_source_maxlon(m) >= G%geoLonT(i,j) .and. &
@@ -309,10 +319,10 @@ subroutine dye_flux_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
           G%mask2dT(i,j) > 0.0 ) then
         surface_flux_diag(i,j) = CS%surface_flux_const(m)
         
-        ! Apply flux to surface layer carefully to avoid numerical issues
-        ! Flux [conc Z T-1] * dt [T] / h [H] = change in concentration
-        if (h_old(i,j,1) > GV%Angstrom_H) then
-          CS%tr(i,j,1,m) = CS%tr(i,j,1,m) + (dt * CS%surface_flux_const(m) / h_old(i,j,1))
+        ! Apply flux to surface layer after vertical processes
+        ! Use h_new instead of h_old since vertical processes have occurred
+        if (h_new(i,j,1) > GV%Angstrom_H) then
+          CS%tr(i,j,1,m) = CS%tr(i,j,1,m) + (dt * CS%surface_flux_const(m) / h_new(i,j,1))
         endif
       endif
     enddo ; enddo
@@ -320,9 +330,6 @@ subroutine dye_flux_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
     ! Post diagnostic of surface flux
     if (CS%id_surface_flux(m) > 0) &
       call post_data(CS%id_surface_flux(m), surface_flux_diag, CS%diag)
-
-    ! Apply vertical diffusion (without calling applyTracerBoundaryFluxesInOut to avoid conflict)
-    call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
 
     ! Calculate net vertical flux from entrainment for diagnostics
     ! Net flux = upward component - downward component
