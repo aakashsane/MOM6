@@ -46,6 +46,9 @@ use MARBL_tracers, only : MARBL_tracers_stock, MARBL_tracers_end, MARBL_tracers_
 use regional_dyes, only : register_dye_tracer, initialize_dye_tracer
 use regional_dyes, only : dye_tracer_column_physics, dye_tracer_surface_state
 use regional_dyes, only : dye_stock, regional_dyes_end, dye_tracer_CS
+use dye_fluxes, only : register_dye_flux_tracer, initialize_dye_flux_tracer
+use dye_fluxes, only : dye_flux_tracer_column_physics, dye_flux_tracer_surface_state
+use dye_fluxes, only : dye_flux_stock, dye_fluxes_end, dye_flux_tracer_CS
 use MOM_OCMIP2_CFC, only : register_OCMIP2_CFC, initialize_OCMIP2_CFC, flux_init_OCMIP2_CFC
 use MOM_OCMIP2_CFC, only : OCMIP2_CFC_column_physics, OCMIP2_CFC_surface_state
 use MOM_OCMIP2_CFC, only : OCMIP2_CFC_stock, OCMIP2_CFC_end, OCMIP2_CFC_CS
@@ -92,6 +95,7 @@ type, public :: tracer_flow_control_CS ; private
   logical :: use_ideal_age = .false.               !< If true, use the ideal age tracer package
   logical :: use_MARBL_tracers = .false.           !< If true, use the MARBL tracer package
   logical :: use_regional_dyes = .false.           !< If true, use the regional dyes tracer package
+  logical :: use_dye_flux_tracers = .false.        !< If true, use the dye flux tracer package
   logical :: use_oil = .false.                     !< If true, use the oil tracer package
   logical :: use_advection_test_tracer = .false.   !< If true, use the advection_test_tracer package
   logical :: use_OCMIP2_CFC = .false.              !< If true, use the OCMIP2_CFC tracer package
@@ -110,6 +114,7 @@ type, public :: tracer_flow_control_CS ; private
   type(ideal_age_tracer_CS), pointer :: ideal_age_tracer_CSp => NULL()
   type(MARBL_tracers_CS), pointer :: MARBL_tracers_CSp => NULL()
   type(dye_tracer_CS), pointer :: dye_tracer_CSp => NULL()
+  type(dye_flux_tracer_CS), pointer :: dye_flux_tracer_CSp => NULL()
   type(oil_tracer_CS), pointer :: oil_tracer_CSp => NULL()
   type(advection_test_tracer_CS), pointer :: advection_test_tracer_CSp => NULL()
   type(OCMIP2_CFC_CS), pointer :: OCMIP2_CFC_CSp => NULL()
@@ -207,6 +212,9 @@ subroutine call_tracer_register(G, GV, US, param_file, CS, tr_Reg, restart_CS)
   call get_param(param_file, mdl, "USE_REGIONAL_DYES", CS%use_regional_dyes, &
                  "If true, use the regional_dyes tracer package.", &
                  default=.false.)
+  call get_param(param_file, mdl, "USE_DYE_FLUX_TRACERS", CS%use_dye_flux_tracers, &
+                 "If true, use passive dye tracers with constant surface fluxes.", &
+                 default=.false.)
   call get_param(param_file, mdl, "USE_OIL_TRACER", CS%use_oil, &
                  "If true, use the oil_tracer tracer package.", &
                  default=.false.)
@@ -259,6 +267,9 @@ subroutine call_tracer_register(G, GV, US, param_file, CS, tr_Reg, restart_CS)
                         tr_Reg, restart_CS, CS%get_chl_from_MARBL)
   if (CS%use_regional_dyes) CS%use_regional_dyes = &
     register_dye_tracer(G%HI, GV, US, param_file, CS%dye_tracer_CSp, &
+                        tr_Reg, restart_CS)
+  if (CS%use_dye_flux_tracers) CS%use_dye_flux_tracers = &
+    register_dye_flux_tracer(G%HI, GV, US, param_file, CS%dye_flux_tracer_CSp, &
                         tr_Reg, restart_CS)
   if (CS%use_oil) CS%use_oil = &
     register_oil_tracer(G%HI, GV, US, param_file,  CS%oil_tracer_CSp, &
@@ -346,6 +357,8 @@ subroutine tracer_flow_control_init(restart, day, G, GV, US, h, param_file, diag
                                 sponge_CSp)
   if (CS%use_regional_dyes) &
     call initialize_dye_tracer(restart, day, G, GV, US, h, diag, OBC, CS%dye_tracer_CSp, sponge_CSp, tv)
+  if (CS%use_dye_flux_tracers) &
+    call initialize_dye_flux_tracer(restart, day, G, GV, US, h, diag, OBC, CS%dye_flux_tracer_CSp, sponge_CSp, tv)
   if (CS%use_oil) &
     call initialize_oil_tracer(restart, day, G, GV, US, h, diag, OBC, CS%oil_tracer_CSp, sponge_CSp)
   if (CS%use_advection_test_tracer) &
@@ -539,6 +552,11 @@ subroutine call_tracer_column_fns(h_old, h_new, ea, eb, fluxes, mld, dt, G, GV, 
                                      G, GV, US, tv, CS%dye_tracer_CSp, &
                                      evap_CFL_limit=evap_CFL_limit, &
                                      minimum_forcing_depth=minimum_forcing_depth)
+    if (CS%use_dye_flux_tracers) &
+      call dye_flux_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
+                                     G, GV, US, tv, CS%dye_flux_tracer_CSp, &
+                                     evap_CFL_limit=evap_CFL_limit, &
+                                     minimum_forcing_depth=minimum_forcing_depth)
     if (CS%use_oil) &
       call oil_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                      G, GV, US, CS%oil_tracer_CSp, tv, &
@@ -625,6 +643,9 @@ subroutine call_tracer_column_fns(h_old, h_new, ea, eb, fluxes, mld, dt, G, GV, 
     if (CS%use_regional_dyes) &
       call dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                            G, GV, US, tv, CS%dye_tracer_CSp)
+    if (CS%use_dye_flux_tracers) &
+      call dye_flux_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
+                                           G, GV, US, tv, CS%dye_flux_tracer_CSp)
     if (CS%use_oil) &
       call oil_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                      G, GV, US, CS%oil_tracer_CSp, tv)
@@ -752,6 +773,11 @@ subroutine call_tracer_stocks(h, stock_values, G, GV, US, CS, stock_names, stock
   if (CS%use_regional_dyes) then
     ns = dye_stock(h, values_EFP, G, GV, CS%dye_tracer_CSp, names, units, stock_index)
     call store_stocks("regional_dyes", ns, names, units, values_EFP, index, stock_val_EFP, &
+                      set_pkg_name, max_ns, ns_tot, stock_names, stock_units)
+  endif
+  if (CS%use_dye_flux_tracers) then
+    ns = dye_flux_stock(h, values_EFP, G, GV, CS%dye_flux_tracer_CSp, names, units, stock_index)
+    call store_stocks("dye_fluxes", ns, names, units, values_EFP, index, stock_val_EFP, &
                       set_pkg_name, max_ns, ns_tot, stock_names, stock_units)
   endif
   if (CS%use_oil) then
@@ -907,6 +933,8 @@ subroutine call_tracer_surface_state(sfc_state, h, G, GV, US, CS)
     call MARBL_tracers_surface_state(sfc_state, G, US, CS%MARBL_tracers_CSp)
   if (CS%use_regional_dyes) &
     call dye_tracer_surface_state(sfc_state, h, G, GV, CS%dye_tracer_CSp)
+  if (CS%use_dye_flux_tracers) &
+    call dye_flux_tracer_surface_state(sfc_state, h, G, GV, CS%dye_flux_tracer_CSp)
   if (CS%use_oil) &
     call oil_tracer_surface_state(sfc_state, h, G, GV, CS%oil_tracer_CSp)
   if (CS%use_advection_test_tracer) &
@@ -930,6 +958,7 @@ subroutine tracer_flow_control_end(CS)
   if (CS%use_ideal_age) call ideal_age_example_end(CS%ideal_age_tracer_CSp)
   if (CS%use_MARBL_tracers) call MARBL_tracers_end(CS%MARBL_tracers_CSp)
   if (CS%use_regional_dyes) call regional_dyes_end(CS%dye_tracer_CSp)
+  if (CS%use_dye_flux_tracers) call dye_fluxes_end(CS%dye_flux_tracer_CSp)
   if (CS%use_oil) call oil_tracer_end(CS%oil_tracer_CSp)
   if (CS%use_advection_test_tracer) call advection_test_tracer_end(CS%advection_test_tracer_CSp)
   if (CS%use_OCMIP2_CFC) call OCMIP2_CFC_end(CS%OCMIP2_CFC_CSp)

@@ -128,25 +128,25 @@ function register_dye_flux_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
   ! Read geographic bounds and flux values for each tracer
   call get_param(param_file, mdl, "DYE_FLUX_SOURCE_MINLON", CS%flux_source_minlon, &
                  "This is the minimum longitude of the region where the dye flux is applied.", &
-                 units=G%x_ax_unit_short, fail_if_missing=.true.)
+                 units="degrees_E", fail_if_missing=.true.)
   if (minval(CS%flux_source_minlon(:)) < -1.e29) &
     call MOM_error(FATAL, "register_dye_flux_tracer: Not enough values provided for DYE_FLUX_SOURCE_MINLON")
 
   call get_param(param_file, mdl, "DYE_FLUX_SOURCE_MAXLON", CS%flux_source_maxlon, &
                  "This is the maximum longitude of the region where the dye flux is applied.", &
-                 units=G%x_ax_unit_short, fail_if_missing=.true.)
+                 units="degrees_E", fail_if_missing=.true.)
   if (minval(CS%flux_source_maxlon(:)) < -1.e29) &
     call MOM_error(FATAL, "register_dye_flux_tracer: Not enough values provided for DYE_FLUX_SOURCE_MAXLON")
 
   call get_param(param_file, mdl, "DYE_FLUX_SOURCE_MINLAT", CS%flux_source_minlat, &
                  "This is the minimum latitude of the region where the dye flux is applied.", &
-                 units=G%y_ax_unit_short, fail_if_missing=.true.)
+                 units="degrees_N", fail_if_missing=.true.)
   if (minval(CS%flux_source_minlat(:)) < -1.e29) &
     call MOM_error(FATAL, "register_dye_flux_tracer: Not enough values provided for DYE_FLUX_SOURCE_MINLAT")
 
   call get_param(param_file, mdl, "DYE_FLUX_SOURCE_MAXLAT", CS%flux_source_maxlat, &
                  "This is the maximum latitude of the region where the dye flux is applied.", &
-                 units=G%y_ax_unit_short, fail_if_missing=.true.)
+                 units="degrees_N", fail_if_missing=.true.)
   if (minval(CS%flux_source_maxlat(:)) < -1.e29) &
     call MOM_error(FATAL, "register_dye_flux_tracer: Not enough values provided for DYE_FLUX_SOURCE_MAXLAT")
 
@@ -165,7 +165,7 @@ function register_dye_flux_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
           desc="The horizontal transport scheme for dye flux tracer:\n"//&
           trim(TracerAdvectionSchemeDoc)//&
           "\n Set to blank (the default) to use TRACER_ADVECTION_SCHEME.", default="")
-    call set_tracer_advect_scheme(mesg, advect_scheme)
+    call set_tracer_advect_scheme(advect_scheme, mesg)
 
     ! Register each tracer
     write(var_name,'(A,I3.3)') "dye_flux_",m
