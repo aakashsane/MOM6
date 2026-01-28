@@ -128,6 +128,7 @@ type, public :: KPP_CS ; private
                                        !! calculations.  Values below 20240501 recover the answers
                                        !! from early in 2024, while higher values use expressions
                                        !! that have been refactored for rotational symmetry.
+  logical :: ML_diffusivity            !< Flag to switch on machine learned shape function
 
   !> CVMix parameters
   type(CVMix_kpp_params_type), pointer :: KPP_params => NULL()
@@ -355,6 +356,10 @@ logical function KPP_init(paramFile, G, GV, US, diag, Time, CS, passive)
                  '\t CUBIC     - A cubic profile, (1-sigma)^2(1+2*sigma)\n'//                  &
                  '\t CUBIC_LMD - The original KPP profile',                                    &
                  default='CVMix')
+  ! The coefficients used for machine learned diffusivity
+  call get_param(paramFile, mdl, 'ML_DIFFUSIVITY', CS%ML_diffusivity, &
+                   'Use machine learned diffusivity ', default=.False.)
+
   select case ( trim(string) )
     case ("CVMix")     ; CS%NLT_shape = NLT_SHAPE_CVMix
     case ("LINEAR")    ; CS%NLT_shape = NLT_SHAPE_LINEAR
@@ -546,6 +551,7 @@ logical function KPP_init(paramFile, G, GV, US, diag, Time, CS, passive)
                        lnoDGat1=lnoDGat1                  ,&
                        langmuir_mixing_str=langmuir_mixing_opt,&
                        langmuir_entrainment_str=langmuir_entrainment_opt,&
+                       ML_diffusivity=CS%ML_diffusivity,   &
                        CVMix_kpp_params_user=CS%KPP_params )
 
   ! Register diagnostics
@@ -704,6 +710,7 @@ subroutine KPP_calculate(CS, G, GV, US, h, tv, uStar, buoyFlux, Kt, Ks, Kv, &
   real :: buoy_scale ! A unit conversion factor for buoyancy fluxes [m2 T3 L-2 s-3 ~> 1]
   real :: dh    ! The local thickness used for calculating interface positions [Z ~> m]
   real :: hcorr ! A cumulative correction arising from inflation of vanished layers [Z ~> m]
+  real :: Coriolis              ! Coriolis parameter at tracer points in MKS units [s-1]
 
   ! For Langmuir Calculations
   real :: LangEnhK     ! Langmuir enhancement for mixing coefficient [nondim]
@@ -834,7 +841,11 @@ subroutine KPP_calculate(CS, G, GV, US, h, tv, uStar, buoyFlux, Kt, Ks, Kv, &
       do K = 1, GV%ke+1
         z_inter(K) = US%Z_to_m*iFaceHeight(K)
       enddo
-
+      
+      ! Replace the original CVMix_coeffs_kpp call with this block:
+      !if (CS%ML_diffusivity) then
+      Coriolis = 0.25*US%s_to_T*( (G%CoriolisBu(i,j)   + G%CoriolisBu(i-1,j-1)) + &
+                                  (G%CoriolisBu(i-1,j) + G%CoriolisBu(i,j-1)) )
       call CVMix_coeffs_kpp(Kviscosity(:),     & ! (inout) Total viscosity [m2 s-1]
                             Kdiffusivity(:,1), & ! (inout) Total heat diffusivity [m2 s-1]
                             Kdiffusivity(:,2), & ! (inout) Total salt diffusivity [m2 s-1]
@@ -853,6 +864,7 @@ subroutine KPP_calculate(CS, G, GV, US, h, tv, uStar, buoyFlux, Kt, Ks, Kv, &
                             GV%ke,             & ! (in) Number of levels in array shape
                             Langmuir_EFactor=LangEnhK,& ! Langmuir enhancement multiplier
                             StokesXi = CS%StokesParXI(i,j), & ! Stokes forcing parameter
+                            Coriolis = Coriolis, & ! passing the Coriolis parameter
                             CVMix_kpp_params_user=CS%KPP_params )
 
       ! safety check, Kviscosity and Kdiffusivity must be >= 0
