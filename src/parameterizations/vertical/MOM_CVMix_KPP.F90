@@ -1090,6 +1090,8 @@ subroutine KPP_compute_BLD(CS, G, GV, US, h, Temp, Salt, u, v, tv, uStar, buoyFl
   real, dimension( GV%ke )     :: StokesXI_1d ,   StokesVt_1d    !  Parameters of TKE production ratio [nondim]
   real :: Llimit ! Stable boundary Layer Limit =  vonk Lstar [Z ~> m]
   integer :: kbl ! index of cell containing boundary layer depth
+  ! Dummy variables for CVMix output parameters not currently used
+  real :: BEdE_ER_dummy, PU_TKE_dummy, PS_TKE_dummy, PB_TKE_dummy
 
   if (CS%Stokes_Mixing .and. .not.associated(Waves)) call MOM_error(FATAL, &
       "KPP_compute_BLD: The Waves control structure must be associated if STOKES_MIXING is True.")
@@ -1190,8 +1192,9 @@ subroutine KPP_compute_BLD(CS, G, GV, US, h, Temp, Salt, u, v, tv, uStar, buoyFl
           call Compute_StokesDrift(i,j, iFaceHeight(ksfc) , -SLdepth_0d,  &
               uS_SLD  , vS_SLD, uS_SLC , vS_SLC,  uSbar_SLD, vSbar_SLD, Waves)
           call cvmix_kpp_compute_StokesXi( iFaceHeight,CellHeight,ksfc ,SLdepth_0d,surfBuoyFlux, &
-               surfFricVel,waves%omega_w2x(i,j), uE_H, vE_H, uS_Hi, vS_Hi, uSbar_H, vSbar_H, uS_SLD,&
-               vS_SLD, uSbar_SLD, vSbar_SLD, StokesXI, CVMix_kpp_params_user=CS%KPP_params )
+               surfBuoyFlux, surfFricVel,waves%omega_w2x(i,j), uE_H, vE_H, uS_Hi, vS_Hi, uSbar_H, vSbar_H, uS_SLD,&
+               vS_SLD, uSbar_SLD, vSbar_SLD, StokesXI, BEdE_ER_dummy, PU_TKE_dummy, PS_TKE_dummy, &
+               PB_TKE_dummy, CVMix_kpp_params_user=CS%KPP_params )
           StokesXI_1d(k) = StokesXI
           StokesVt_1d(k) = 0.0  ! StokesXI
 
@@ -1435,9 +1438,10 @@ subroutine KPP_compute_BLD(CS, G, GV, US, h, Temp, Salt, u, v, tv, uStar, buoyFl
       call Compute_StokesDrift(i,j, iFaceHeight(ksfc) , -SLdepth_0d,  &
               uS_SLD  , vS_SLD, uS_SLC , vS_SLC,  uSbar_SLD, vSbar_SLD, Waves)
       call cvmix_kpp_compute_StokesXi( iFaceHeight,CellHeight,ksfc ,SLdepth_0d,  &
-               surfBuoyFlux, surfFricVel,waves%omega_w2x(i,j), uE_H, vE_H, uS_Hi, &
+               surfBuoyFlux, surfBuoyFlux, surfFricVel,waves%omega_w2x(i,j), uE_H, vE_H, uS_Hi, &
                vS_Hi, uSbar_H, vSbar_H, uS_SLD, vS_SLD, uSbar_SLD, vSbar_SLD,     &
-               StokesXI, CVMix_kpp_params_user=CS%KPP_params )
+               StokesXI, BEdE_ER_dummy, PU_TKE_dummy, PS_TKE_dummy, PB_TKE_dummy,  &
+               CVMix_kpp_params_user=CS%KPP_params )
       CS%StokesParXI(i,j) = StokesXI
       CS%Lam2(i,j)        = sqrt(US_Hi(1)**2+VS_Hi(1)**2) / MAX(surfFricVel,0.0002)
 
