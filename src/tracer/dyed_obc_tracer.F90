@@ -4,7 +4,7 @@ module dyed_obc_tracer
 ! This file is part of MOM6. See LICENSE.md for the license.
 
 use MOM_coupler_types,      only : atmos_ocn_coupler_flux
-use MOM_diag_mediator,      only : diag_ctrl, post_data, register_diag_field
+use MOM_diag_mediator,      only : diag_ctrl
 use MOM_error_handler,      only : MOM_error, FATAL, WARNING
 use MOM_file_parser,        only : get_param, log_param, log_version, param_file_type
 use MOM_forcing_type,       only : forcing
@@ -34,7 +34,6 @@ public dyed_obc_tracer_column_physics, dyed_obc_tracer_end
 !> The control structure for the dyed_obc tracer package
 type, public :: dyed_obc_tracer_CS ; private
   integer :: ntr    !< The number of tracers that are actually used.
-  integer :: n_dye  !< Number of regional dye tracers (for naming offset)
   logical :: coupled_tracers = .false. !< These tracers are not offered to the coupler.
   character(len=200) :: tracer_IC_file !< The full path to the IC file, or " " to initialize internally.
   type(time_type), pointer :: Time => NULL() !< A pointer to the ocean model's clock.
@@ -46,8 +45,6 @@ type, public :: dyed_obc_tracer_CS ; private
 
   integer, allocatable, dimension(:) :: ind_tr !< Indices returned by atmos_ocn_coupler_flux if it is used and the
                                                !! surface tracer concentrations are to be provided to the coupler.
-
-  integer, allocatable, dimension(:) :: id_tr_sq !< Diagnostic IDs for squared tracer fields
 
   type(diag_ctrl), pointer :: diag => NULL() !< A structure that is used to
                                    !! regulate the timing of diagnostic output.
@@ -108,10 +105,8 @@ function register_dyed_obc_tracer(HI, GV, param_file, CS, tr_Reg, restart_CS)
                    "The number of dye tracers in this run. Each tracer "//&
                    "should have a separate region.", default=0, do_not_log=.true.)
   endif
-  CS%n_dye = n_dye
   allocate(CS%ind_tr(CS%ntr))
   allocate(CS%tr_desc(CS%ntr))
-  allocate(CS%id_tr_sq(CS%ntr))
 
   call get_param(param_file, mdl, "dyed_obc_TRACER_IC_FILE", CS%tracer_IC_file, &
                  "The name of a file from which to read the initial "//&
@@ -200,13 +195,6 @@ subroutine initialize_dyed_obc_tracer(restart, day, G, GV, h, diag, OBC, CS)
   CS%Time => day
   CS%diag => diag
 
-  ! Register diagnostics for squared tracer fields
-  do m = 1, CS%ntr
-    write(name,'("dye_",I2.2,"_sq")') m+CS%n_dye
-    CS%id_tr_sq(m) = register_diag_field('ocean_model', trim(name), &
-        diag%axesTL, day, 'Squared dyed_obc tracer', 'conc2')
-  enddo
-
   do m=1,CS%ntr
     if ((.not.restart) .or. (CS%tracers_may_reinit .and. .not. &
         query_initialized(CS%tr(:,:,:,m), name, CS%restart_CSp))) then
@@ -263,7 +251,6 @@ subroutine dyed_obc_tracer_column_physics(h_old, h_new,  ea,  eb, fluxes, dt, G,
 
 ! Local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: h_work ! Used so that h can be modified [H ~> m or kg m-2]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: tr_squared ! Squared tracer field for diagnostics
   integer :: i, j, k, is, ie, js, je, nz, m
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
@@ -284,16 +271,6 @@ subroutine dyed_obc_tracer_column_physics(h_old, h_new,  ea,  eb, fluxes, dt, G,
       if (nz > 1) call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
     enddo
   endif
-
-  ! Compute and post squared tracer diagnostics
-  do m = 1, CS%ntr
-    if (CS%id_tr_sq(m) > 0) then
-      do k = 1, nz ; do j = js, je ; do i = is, ie
-        tr_squared(i,j,k) = CS%tr(i,j,k,m) * CS%tr(i,j,k,m)
-      enddo ; enddo ; enddo
-      call post_data(CS%id_tr_sq(m), tr_squared, CS%diag)
-    endif
-  enddo
 
 end subroutine dyed_obc_tracer_column_physics
 

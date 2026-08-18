@@ -5,7 +5,7 @@ module regional_dyes
 
 use MOM_coms,               only : EFP_type
 use MOM_coupler_types,      only : set_coupler_type_data, atmos_ocn_coupler_flux
-use MOM_diag_mediator,      only : diag_ctrl, post_data, register_diag_field
+use MOM_diag_mediator,      only : diag_ctrl
 use MOM_error_handler,      only : MOM_error, FATAL, WARNING
 use MOM_file_parser,        only : get_param, log_param, log_version, param_file_type
 use MOM_forcing_type,       only : forcing
@@ -63,8 +63,6 @@ type, public :: dye_tracer_CS ; private
                                    !! regulate the timing of diagnostic output.
   type(MOM_restart_CS), pointer :: restart_CSp => NULL() !< A pointer to the restart control structure
 
-  integer, allocatable, dimension(:) :: id_tr_sq !< Diagnostic IDs for squared tracer fields
-
   type(vardesc), allocatable :: tr_desc(:) !< Descriptions and metadata for the tracers
   logical :: tracers_may_reinit = .true. !< If true the tracers may be initialized if not found in a restart file
 end type dye_tracer_CS
@@ -118,7 +116,6 @@ function register_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS)
            CS%dye_source_maxdepth(CS%ntr))
   allocate(CS%ind_tr(CS%ntr))
   allocate(CS%tr_desc(CS%ntr))
-  allocate(CS%id_tr_sq(CS%ntr))
 
   CS%dye_source_minlon(:) = -1.e30
   call get_param(param_file, mdl, "DYE_SOURCE_MINLON", CS%dye_source_minlon, &
@@ -225,7 +222,6 @@ subroutine initialize_dye_tracer(restart, day, G, GV, h, diag, OBC, CS, sponge_C
   type(thermo_var_ptrs),              intent(in) :: tv   !< A structure pointing to various thermodynamic variables
 
   ! Local variables
-  character(len=64)  :: var_name, desc_name
   real    :: dz(SZI_(G),SZK_(GV)) ! Height change across layers [Z ~> m]
   real    :: z_bot    ! Height of the bottom of the layer relative to the sea surface [Z ~> m]
   real    :: z_center ! Height of the center of the layer relative to the sea surface [Z ~> m]
@@ -235,14 +231,6 @@ subroutine initialize_dye_tracer(restart, day, G, GV, h, diag, OBC, CS, sponge_C
   if (CS%ntr < 1) return
 
   CS%diag => diag
-
-  ! Register diagnostics for squared tracer fields
-  do m = 1, CS%ntr
-    write(var_name,'(A,I3.3,A)') "dye",m,"_sq"
-    write(desc_name,'(A,I3.3,A)') "Squared dye tracer ",m
-    CS%id_tr_sq(m) = register_diag_field('ocean_model', trim(var_name), &
-        diag%axesTL, day, trim(desc_name), 'conc2')
-  enddo
 
   ! Establish location of source
   do j=G%jsc,G%jec
@@ -304,7 +292,6 @@ subroutine dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, GV, US
 
   ! Local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: h_work ! Used so that h can be modified [H ~> m or kg m-2]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: tr_squared ! Squared tracer field for diagnostics
   real    :: dz(SZI_(G),SZK_(GV)) ! Height change across layers [Z ~> m]
   real    :: z_bot    ! Height of the bottom of the layer relative to the sea surface [Z ~> m]
   real    :: z_center ! Height of the center of the layer relative to the sea surface [Z ~> m]
@@ -350,16 +337,6 @@ subroutine dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, GV, US
         enddo
       endif
     enddo ; enddo
-  enddo
-
-  ! Compute and post squared tracer diagnostics
-  do m = 1, CS%ntr
-    if (CS%id_tr_sq(m) > 0) then
-      do k = 1, nz ; do j = js, je ; do i = is, ie
-        tr_squared(i,j,k) = CS%tr(i,j,k,m) * CS%tr(i,j,k,m)
-      enddo ; enddo ; enddo
-      call post_data(CS%id_tr_sq(m), tr_squared, CS%diag)
-    endif
   enddo
 
 end subroutine dye_tracer_column_physics
