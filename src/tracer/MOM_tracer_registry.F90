@@ -350,6 +350,9 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           cmor_field_name=cmorname, cmor_long_name=cmor_longname, &
           cmor_units=Tr%cmor_units, cmor_standard_name=cmor_long_std(cmor_longname))
     endif
+    Tr%id_tr_sq = register_diag_field("ocean_model", trim(name)//"_sq", diag%axesTL, &
+        Time, "Square of "//trim(longname), "("//trim(units)//")2", &
+        conversion=Tr%conc_scale**2)
     Tr%id_tr_post_horzn = register_diag_field("ocean_model", &
         trim(name)//"_post_horzn", diag%axesTL, Time, &
         trim(longname)//" after horizontal transport (advection/diffusion) has occurred", &
@@ -723,6 +726,15 @@ subroutine post_tracer_diagnostics_at_sync(Reg, h, diag_prev, diag, G, GV, dt)
   do m=1,Reg%ntr ; if (Reg%Tr(m)%registry_diags) then
     Tr => Reg%Tr(m)
     if (Tr%id_tr > 0) call post_data(Tr%id_tr, Tr%t, diag)
+    if (Tr%id_tr_sq > 0) then
+      ! Compute the square from the same tracer state that id_tr is posted from, so that
+      ! the saved square is exactly consistent with the saved concentration.
+      work3d(:,:,:) = 0.0
+      do k=1,nz ; do j=js,je ; do i=is,ie
+        work3d(i,j,k) = Tr%t(i,j,k) * Tr%t(i,j,k)
+      enddo ; enddo ; enddo
+      call post_data(Tr%id_tr_sq, work3d, diag)
+    endif
     if (Tr%id_tendency > 0) then
       work3d(:,:,:) = 0.0
       do k=1,nz ; do j=js,je ; do i=is,ie
