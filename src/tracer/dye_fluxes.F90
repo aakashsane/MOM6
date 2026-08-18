@@ -63,6 +63,7 @@ type, public :: dye_flux_tracer_CS ; private
 
   integer, allocatable, dimension(:) :: id_surface_flux !< Diagnostic IDs for surface tracer fluxes
   integer, allocatable, dimension(:) :: id_tr_dia_diff  !< Diagnostic IDs for vertical tracer fluxes (positive up)
+  integer, allocatable, dimension(:) :: id_tr_sq !< Diagnostic IDs for squared tracer fields
 
   type(diag_ctrl), pointer :: diag => NULL() !< A structure that is used to
                                    !! regulate the timing of diagnostic output.
@@ -124,6 +125,7 @@ function register_dye_flux_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
   allocate(CS%tr_desc(CS%ntr))
   allocate(CS%id_tr_dia_diff(CS%ntr))
   allocate(CS%id_surface_flux(CS%ntr))
+  allocate(CS%id_tr_sq(CS%ntr))
 
   ! Read geographic bounds and flux values for each tracer
   call get_param(param_file, mdl, "DYE_FLUX_SOURCE_MINLON", CS%flux_source_minlon, &
@@ -235,6 +237,11 @@ subroutine initialize_dye_flux_tracer(restart, day, G, GV, US, h, diag, OBC, CS,
     write(longname,'(A,I3.3,A)') "Vertical diffusive flux of dye flux tracer ",m," (positive up)"
     CS%id_tr_dia_diff(m) = register_diag_field('ocean_model', trim(var_name), &
         diag%axesTi, day, trim(longname), 'conc H s-1', conversion=GV%H_to_MKS*US%s_to_T)
+
+    write(var_name,'(A,I3.3,A)') "dye_flux_",m,"_sq"
+    write(longname,'(A,I3.3,A)') "Squared dye flux tracer ",m
+    CS%id_tr_sq(m) = register_diag_field('ocean_model', trim(var_name), &
+        diag%axesTL, day, trim(longname), 'conc2')
   enddo
 
   ! Initialize tracers to zero (can be modified if restart file exists)
@@ -283,6 +290,7 @@ subroutine dye_flux_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: vert_flux ! Vertical tracer flux positive upward
                                               !! [conc H T-1 ~> conc m s-1]
   real, dimension(SZI_(G),SZJ_(G)) :: surface_flux_diag ! Surface tracer flux for diagnostics [conc Z T-1 ~> conc m s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: tr_squared ! Squared tracer field for diagnostics
   real    :: Idt      ! Inverse of timestep [T-1 ~> s-1]
   integer :: i, j, k, is, ie, js, je, nz, m
 
@@ -344,6 +352,14 @@ subroutine dye_flux_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
     ! Post diagnostic of vertical flux
     if (CS%id_tr_dia_diff(m) > 0) &
       call post_data(CS%id_tr_dia_diff(m), vert_flux, CS%diag)
+
+    ! Compute and post squared tracer diagnostic
+    if (CS%id_tr_sq(m) > 0) then
+      do k = 1, nz ; do j = js, je ; do i = is, ie
+        tr_squared(i,j,k) = CS%tr(i,j,k,m) * CS%tr(i,j,k,m)
+      enddo ; enddo ; enddo
+      call post_data(CS%id_tr_sq(m), tr_squared, CS%diag)
+    endif
   enddo
 
 end subroutine dye_flux_tracer_column_physics
